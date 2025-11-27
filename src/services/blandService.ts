@@ -1,3 +1,8 @@
+// ============================================================================
+// Bland Service
+// Handles all interactions with Bland AI API
+// ============================================================================
+
 import axios, { AxiosInstance } from "axios";
 import { config } from "../config";
 import { logger } from "../utils/logger";
@@ -23,8 +28,9 @@ class BlandService {
     });
   }
 
-  //  Send an outbound call via Bland
-
+  /**
+   * Send an outbound call via Bland
+   */
   async sendOutboundCall(payload: {
     phoneNumber: string;
     firstName: string;
@@ -42,8 +48,7 @@ class BlandService {
       from_number: config.bland.fromNumber,
       transfer_phone_number: config.bland.transferNumber,
       voicemail_message: config.bland.voicemailMessage,
-      caller_id: payload.phoneNumber, // Usw customer's phone as caller ID
-      // TODO: Add any additional metadata needed
+      caller_id: payload.phoneNumber, // Use customer's phone as caller ID
     };
 
     try {
@@ -56,7 +61,7 @@ class BlandService {
           // return result.data;
 
           // For now, return mock data
-          logger.warn("  STUB: Using mock Bland call response");
+          logger.warn("⚠️  STUB: Using mock Bland call response");
           return {
             call_id: `bland_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
             status: "initiated",
@@ -82,9 +87,10 @@ class BlandService {
     }
   }
 
-  //  Get transcript and outcome from Bland
-  //  Polls until transcript is ready
-
+  /**
+   * Get transcript and outcome from Bland
+   * Polls until transcript is ready
+   */
   async getTranscript(callId: string): Promise<BlandTranscript> {
     logger.info("Fetching transcript from Bland", { call_id: callId });
 
@@ -162,8 +168,9 @@ class BlandService {
     throw new Error("Transcript polling timeout");
   }
 
-  //  Parse raw Bland transcript response into normalized format
-
+  /**
+   * Parse raw Bland transcript response into normalized format
+   */
   private parseTranscript(raw: any): BlandTranscript {
     // TODO: Adjust this based on actual Bland response format
     const outcome = this.mapOutcome(raw.outcome || raw.call_status);
@@ -180,8 +187,9 @@ class BlandService {
     };
   }
 
-  //   Map Bland outcome to standardized CallOutcome enum
-
+  /**
+   * Map Bland outcome to standardized CallOutcome enum
+   */
   private mapOutcome(blandOutcome: string): CallOutcome {
     // TODO: Adjust mappings based on actual Bland outcome values
     const outcomeMap: { [key: string]: CallOutcome } = {
@@ -198,8 +206,9 @@ class BlandService {
     return outcomeMap[normalized] || CallOutcome.UNKNOWN;
   }
 
-  //  Sleep helper
-
+  /**
+   * Sleep helper
+   */
   private sleep(ms: number): Promise<void> {
     return new Promise((resolve) => setTimeout(resolve, ms));
   }

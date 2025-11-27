@@ -46,7 +46,7 @@ awh-outbound-orchestrator/
 │   │   └── awhWebhook.ts     # POST /webhooks/awhealth-outbound
 │   ├── services/
 │   │   ├── blandService.ts   # Bland AI API calls
-│   │   └── convosoService.ts # Convoso API calls
+│   │   └── ConvosoService.ts # Convoso API calls
 │   ├── logic/
 │   │   └── awhOrchestrator.ts # Main orchestration flow
 │   ├── types/
@@ -116,7 +116,7 @@ All configuration is done via environment variables. See `.env.example` for all 
 
 - `BLAND_API_KEY` - Bland AI API key
 - `BLAND_PATHWAY_ID` - Ashley agent pathway ID
-- `CONVOSO_API_KEY` - Convoso API key
+- `Convoso_API_KEY` - Convoso API key
 - `PORT` - Server port (default: 3000)
 
 ## API Endpoints

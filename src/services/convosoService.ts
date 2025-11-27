@@ -21,11 +21,11 @@ class ConvosoService {
         Authorization: `Bearer ${config.convoso.apiKey}`,
         "Content-Type": "application/json",
       },
-      timeout: 30000, // 30 seconds
+      timeout: 30000,
     });
   }
 
-  async getOrCcreateLead(payload: ConvosoWebhookPayload): Promise<ConvosoLead> {
+  async getOrCreateLead(payload: ConvosoWebhookPayload): Promise<ConvosoLead> {
     logger.info("Getting or creating Convoso lead", {
       phone: payload.phone,
       name: `${payload.first_name} ${payload.last_name}`,
@@ -33,7 +33,6 @@ class ConvosoService {
     });
 
     try {
-      // If lead_id is provided, try to fetch it first
       if (payload.lead_id) {
         try {
           const lead = await this.getLead(payload.lead_id);
@@ -46,7 +45,6 @@ class ConvosoService {
         }
       }
 
-      // Otherwise, search by phone number
       const existingLead = await this.findLeadByPhone(payload.phone);
       if (existingLead) {
         logger.info("Found existing lead by phone", {
@@ -55,7 +53,6 @@ class ConvosoService {
         return existingLead;
       }
 
-      // No existing lead, create new one
       return await this.createLead(payload);
     } catch (error: any) {
       logger.error("Failed to get or create lead", {
@@ -66,18 +63,10 @@ class ConvosoService {
     }
   }
 
-  /**
-   * Get a lead by ID
-   */
   private async getLead(leadId: string): Promise<ConvosoLead> {
-    // TODO: Replace with actual Convoso endpoint once you have it
-    // Expected endpoint: GET /v1/leads/{leadId} or similar
     const response = await retry(
       async () => {
-        // STUB: This is where the real API call goes
-        // const result = await this.client.get(`/v1/leads/${leadId}`);
-        // return result.data;
-
+        // TODO: Replace with actual Convoso endpoint
         logger.warn("⚠️  STUB: Using mock Convoso lead response");
         return {
           lead_id: leadId,
@@ -97,21 +86,13 @@ class ConvosoService {
     return response;
   }
 
-  /**
-   * Find a lead by phone number
-   */
   private async findLeadByPhone(phone: string): Promise<ConvosoLead | null> {
-    // TODO: Replace with actual Convoso endpoint once you have it
-    // Expected endpoint: GET /v1/leads?phone={phone} or similar
     try {
       const response = await retry(
         async () => {
-          // STUB: This is where the real API call goes
-          // const result = await this.client.get('/v1/leads', { params: { phone } });
-          // return result.data;
-
+          // TODO: Replace with actual Convoso endpoint
           logger.warn("⚠️  STUB: Using mock Convoso find by phone");
-          return null; // Simulate no existing lead
+          return null;
         },
         {
           maxAttempts: config.retry.maxAttempts,
@@ -126,9 +107,6 @@ class ConvosoService {
     }
   }
 
-  /**
-   * Create a new lead
-   */
   private async createLead(
     payload: ConvosoWebhookPayload
   ): Promise<ConvosoLead> {
@@ -137,20 +115,9 @@ class ConvosoService {
       name: `${payload.first_name} ${payload.last_name}`,
     });
 
-    // TODO: Replace with actual Convoso endpoint once you have it
-    // Expected endpoint: POST /v1/leads or similar
     const response = await retry(
       async () => {
-        // STUB: This is where the real API call goes
-        // const result = await this.client.post('/v1/leads', {
-        //   first_name: payload.first_name,
-        //   last_name: payload.last_name,
-        //   phone: payload.phone,
-        //   state: payload.state,
-        //   ...payload, // Include any additional fields
-        // });
-        // return result.data;
-
+        // TODO: Replace with actual Convoso endpoint
         logger.warn("⚠️  STUB: Using mock Convoso create lead response");
         return {
           lead_id: `convoso_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
@@ -171,9 +138,6 @@ class ConvosoService {
     return response;
   }
 
-  /**
-   * Log a call in Convoso
-   */
   async logCall(
     leadId: string,
     callId: string,
@@ -189,17 +153,12 @@ class ConvosoService {
       call_id: callId,
       phone_number: phoneNumber,
       timestamp: new Date().toISOString(),
-      // TODO: Add other required fields
     };
 
     try {
-      // TODO: Replace with actual Convoso endpoint once you have it
-      // Expected endpoint: POST /v1/calls or /v1/call-logs or similar
       await retry(
         async () => {
-          // STUB: This is where the real API call goes
-          // await this.client.post('/v1/calls', callLogData);
-
+          // TODO: Replace with actual Convoso endpoint
           logger.warn("⚠️  STUB: Simulating Convoso call log");
         },
         {
@@ -215,13 +174,9 @@ class ConvosoService {
         lead_id: leadId,
         call_id: callId,
       });
-      // Don't throw - logging failure shouldn't stop the flow
     }
   }
 
-  /**
-   * Update lead with transcript and outcome
-   */
   async updateLeadFromOutcome(
     leadId: string,
     transcript: BlandTranscript
@@ -231,7 +186,6 @@ class ConvosoService {
       outcome: transcript.outcome,
     });
 
-    // Map outcome to Convoso disposition and status
     const { disposition, status, notes } = this.mapOutcomeToConvoso(transcript);
 
     const updateData: ConvosoLeadUpdateRequest = {
@@ -244,17 +198,12 @@ class ConvosoService {
       zip: transcript.zip,
       state: transcript.state,
       transcript: transcript.transcript,
-      // TODO: Add other update fields
     };
 
     try {
-      // TODO: Replace with actual Convoso endpoint once you have it
-      // Expected endpoint: PUT /v1/leads/{leadId} or PATCH /v1/leads/{leadId}
       await retry(
         async () => {
-          // STUB: This is where the real API call goes
-          // await this.client.put(`/v1/leads/${leadId}`, updateData);
-
+          // TODO: Replace with actual Convoso endpoint
           logger.warn("⚠️  STUB: Simulating Convoso lead update");
         },
         {
@@ -277,17 +226,11 @@ class ConvosoService {
     }
   }
 
-  /**
-   * Map Bland transcript outcome to Convoso disposition and status
-   */
   private mapOutcomeToConvoso(transcript: BlandTranscript): {
     disposition: string;
     status: string;
     notes: string;
   } {
-    // TODO: Get the actual disposition codes and status values from Jeff/Delaine
-    // This is a placeholder mapping based on typical CRM patterns
-
     const outcome = transcript.outcome;
 
     switch (outcome) {

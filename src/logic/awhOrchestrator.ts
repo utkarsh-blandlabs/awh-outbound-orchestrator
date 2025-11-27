@@ -1,289 +1,170 @@
-import axios, { AxiosInstance } from "axios";
-import { config } from "../config";
+// ============================================================================
+// Convoso Service
+// Handles all interactions with Convoso API
+// =======================================
+
 import { logger } from "../utils/logger";
-import { retry, isRetryableHttpError } from "../utils/retry";
+import { blandService } from "../services/blandService";
+import { convosoService } from "../services/convosoService";
 import {
   ConvosoWebhookPayload,
-  ConvosoLead,
-  ConvosoCallLogRequest,
-  ConvosoLeadUpdateRequest,
-  BlandTranscript,
+  OrchestrationResult,
   CallOutcome,
 } from "../types/awh";
 
-class ConvosoService {
-  private client: AxiosInstance;
+/**
+ * Main orchestration function for AWH outbound flow
+ *
+ * Flow:
+ * 1. Get or create lead in Convoso
+ * 2. Trigger Bland outbound call
+ * 3. Log call in Convoso
+ * 4. Poll Bland for transcript
+ * 5. Update Convoso lead with outcome
+ */
+export async function handleAwhOutbound(
+  payload: ConvosoWebhookPayload
+): Promise<OrchestrationResult> {
+  const startTime = Date.now();
 
-  constructor() {
-    this.client = axios.create({
-      baseURL: config.convoso.baseUrl,
-      headers: {
-        Authorization: `Bearer ${config.convoso.apiKey}`,
-        "Content-Type": "application/json",
-      },
-      timeout: 30000,
+  logger.info("Starting AWH outbound orchestration", {
+    phone: payload.phone,
+    name: `${payload.first_name} ${payload.last_name}`,
+    state: payload.state,
+  });
+
+  try {
+    // ========================================================================
+    // STEP 1: Get or create lead in Convoso
+    // ========================================================================
+    logger.info("Step 1: Getting or creating Convoso lead");
+    const lead = await convosoService.getOrCreateLead(payload);
+
+    logger.info("Lead ready", { lead_id: lead.lead_id });
+
+    // ========================================================================
+    // STEP 2: Trigger Bland outbound call
+    // ========================================================================
+    logger.info("Step 2: Triggering Bland outbound call");
+    const callResponse = await blandService.sendOutboundCall({
+      phoneNumber: payload.phone,
+      firstName: payload.first_name,
+      lastName: payload.last_name,
     });
-  }
 
-  async getOrCreateLead(payload: ConvosoWebhookPayload): Promise<ConvosoLead> {
-    logger.info("Getting or creating Convoso lead", {
-      phone: payload.phone,
-      name: `${payload.first_name} ${payload.last_name}`,
-      existing_lead_id: payload.lead_id,
-    });
+    logger.info("Call initiated", { call_id: callResponse.call_id });
 
-    try {
-      if (payload.lead_id) {
-        try {
-          const lead = await this.getLead(payload.lead_id);
-          logger.info("Found existing lead", { lead_id: lead.lead_id });
-          return lead;
-        } catch (error) {
-          logger.warn("Lead ID provided but not found, will create new lead", {
-            lead_id: payload.lead_id,
-          });
-        }
-      }
-
-      const existingLead = await this.findLeadByPhone(payload.phone);
-      if (existingLead) {
-        logger.info("Found existing lead by phone", {
-          lead_id: existingLead.lead_id,
-        });
-        return existingLead;
-      }
-
-      return await this.createLead(payload);
-    } catch (error: any) {
-      logger.error("Failed to get or create lead", {
-        error: error.message,
-        phone: payload.phone,
-      });
-      throw new Error(`Convoso API error: ${error.message}`);
-    }
-  }
-
-  private async getLead(leadId: string): Promise<ConvosoLead> {
-    const response = await retry(
-      async () => {
-        // TODO: Replace with actual Convoso endpoint
-        logger.warn("⚠️  STUB: Using mock Convoso lead response");
-        return {
-          lead_id: leadId,
-          first_name: "Mock",
-          last_name: "Lead",
-          phone: "5551234567",
-          state: "CA",
-          status: "active",
-        };
-      },
-      {
-        maxAttempts: config.retry.maxAttempts,
-        shouldRetry: isRetryableHttpError,
-      }
+    // ========================================================================
+    // STEP 3: Log call in Convoso
+    // ========================================================================
+    logger.info("Step 3: Logging call in Convoso");
+    await convosoService.logCall(
+      lead.lead_id,
+      callResponse.call_id,
+      payload.phone
     );
 
-    return response;
-  }
+    logger.info("Call logged");
 
-  private async findLeadByPhone(phone: string): Promise<ConvosoLead | null> {
-    try {
-      const response = await retry(
-        async () => {
-          // TODO: Replace with actual Convoso endpoint
-          logger.warn("  STUB: Using mock Convoso find by phone");
-          return null;
-        },
-        {
-          maxAttempts: config.retry.maxAttempts,
-          shouldRetry: isRetryableHttpError,
-        }
-      );
+    // ========================================================================
+    // STEP 4: Poll Bland for transcript
+    // ========================================================================
+    logger.info("Step 4: Waiting for Bland transcript");
+    const transcript = await blandService.getTranscript(callResponse.call_id);
 
-      return response;
-    } catch (error) {
-      logger.debug("Lead not found by phone", { phone });
-      return null;
-    }
-  }
-
-  private async createLead(
-    payload: ConvosoWebhookPayload
-  ): Promise<ConvosoLead> {
-    logger.info("Creating new Convoso lead", {
-      phone: payload.phone,
-      name: `${payload.first_name} ${payload.last_name}`,
-    });
-
-    const response = await retry(
-      async () => {
-        // TODO: Replace with actual Convoso endpoint
-        logger.warn("  STUB: Using mock Convoso create lead response");
-        return {
-          lead_id: `convoso_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
-          first_name: payload.first_name,
-          last_name: payload.last_name,
-          phone: payload.phone,
-          state: payload.state,
-          status: "new",
-        };
-      },
-      {
-        maxAttempts: config.retry.maxAttempts,
-        shouldRetry: isRetryableHttpError,
-      }
-    );
-
-    logger.info("Lead created successfully", { lead_id: response.lead_id });
-    return response;
-  }
-
-  async logCall(
-    leadId: string,
-    callId: string,
-    phoneNumber: string
-  ): Promise<void> {
-    logger.info("Logging call in Convoso", {
-      lead_id: leadId,
-      call_id: callId,
-    });
-
-    const callLogData: ConvosoCallLogRequest = {
-      lead_id: leadId,
-      call_id: callId,
-      phone_number: phoneNumber,
-      timestamp: new Date().toISOString(),
-    };
-
-    try {
-      await retry(
-        async () => {
-          // TODO: Replace with actual Convoso endpoint
-          logger.warn("   STUB: Simulating Convoso call log");
-        },
-        {
-          maxAttempts: config.retry.maxAttempts,
-          shouldRetry: isRetryableHttpError,
-        }
-      );
-
-      logger.info("Call logged successfully", { lead_id: leadId });
-    } catch (error: any) {
-      logger.error("Failed to log call in Convoso", {
-        error: error.message,
-        lead_id: leadId,
-        call_id: callId,
-      });
-    }
-  }
-
-  async updateLeadFromOutcome(
-    leadId: string,
-    transcript: BlandTranscript
-  ): Promise<void> {
-    logger.info("Updating Convoso lead with outcome", {
-      lead_id: leadId,
+    logger.info("✓ Transcript received", {
       outcome: transcript.outcome,
-    });
-
-    const { disposition, status, notes } = this.mapOutcomeToConvoso(transcript);
-
-    const updateData: ConvosoLeadUpdateRequest = {
-      lead_id: leadId,
-      status,
-      disposition,
-      notes,
       plan_type: transcript.plan_type,
       member_count: transcript.member_count,
-      zip: transcript.zip,
-      state: transcript.state,
-      transcript: transcript.transcript,
+    });
+
+    // ========================================================================
+    // STEP 5: Apply path logic and update Convoso lead
+    // ========================================================================
+    logger.info("Step 5: Applying path logic and updating lead");
+
+    // TODO: Implement actual Path A/B/C logic once you have the rules
+    // For now, we just update based on outcome
+    await convosoService.updateLeadFromOutcome(lead.lead_id, transcript);
+
+    logger.info("Lead updated");
+
+    // ========================================================================
+    // Success!
+    // ========================================================================
+    const duration = Date.now() - startTime;
+
+    logger.info("AWH orchestration completed successfully", {
+      lead_id: lead.lead_id,
+      call_id: callResponse.call_id,
+      outcome: transcript.outcome,
+      duration_ms: duration,
+    });
+
+    return {
+      success: true,
+      lead_id: lead.lead_id,
+      call_id: callResponse.call_id,
+      outcome: transcript.outcome,
+      transcript,
     };
+  } catch (error: any) {
+    const duration = Date.now() - startTime;
 
-    try {
-      await retry(
-        async () => {
-          // TODO: Replace with actual Convoso endpoint
-          logger.warn("   STUB: Simulating Convoso lead update");
-        },
-        {
-          maxAttempts: config.retry.maxAttempts,
-          shouldRetry: isRetryableHttpError,
-        }
-      );
+    logger.error("AWH orchestration failed", {
+      error: error.message,
+      stack: error.stack,
+      duration_ms: duration,
+      phone: payload.phone,
+    });
 
-      logger.info("Lead updated successfully", {
-        lead_id: leadId,
-        status,
-        disposition,
-      });
-    } catch (error: any) {
-      logger.error("Failed to update lead in Convoso", {
-        error: error.message,
-        lead_id: leadId,
-      });
-      throw new Error(`Convoso update error: ${error.message}`);
-    }
-  }
-
-  private mapOutcomeToConvoso(transcript: BlandTranscript): {
-    disposition: string;
-    status: string;
-    notes: string;
-  } {
-    const outcome = transcript.outcome;
-
-    switch (outcome) {
-      case CallOutcome.TRANSFERRED:
-        return {
-          disposition: "TRANSFERRED",
-          status: "hot_lead",
-          notes: `Call transferred. Plan: ${transcript.plan_type || "Unknown"}, Members: ${transcript.member_count || "Unknown"}`,
-        };
-
-      case CallOutcome.VOICEMAIL:
-        return {
-          disposition: "VOICEMAIL",
-          status: "follow_up",
-          notes: "Voicemail left. Follow-up needed.",
-        };
-
-      case CallOutcome.CALLBACK:
-        return {
-          disposition: "CALLBACK_REQUESTED",
-          status: "callback",
-          notes: "Customer requested callback.",
-        };
-
-      case CallOutcome.NO_ANSWER:
-        return {
-          disposition: "NO_ANSWER",
-          status: "retry",
-          notes: "No answer. Will retry.",
-        };
-
-      case CallOutcome.BUSY:
-        return {
-          disposition: "BUSY",
-          status: "retry",
-          notes: "Line busy. Will retry.",
-        };
-
-      case CallOutcome.FAILED:
-        return {
-          disposition: "FAILED",
-          status: "dead",
-          notes: "Call failed.",
-        };
-
-      default:
-        return {
-          disposition: "UNKNOWN",
-          status: "review",
-          notes: "Call outcome unknown. Needs review.",
-        };
-    }
+    return {
+      success: false,
+      lead_id: "",
+      call_id: "",
+      outcome: CallOutcome.FAILED,
+      error: error.message,
+    };
   }
 }
 
-export const convosoService = new ConvosoService();
+/**
+ * Apply Path A/B/C logic based on transcript
+ * TODO: Implement actual path logic once you have the rules from Delaine/Jeff
+ */
+export function applyPathLogic(transcript: any): {
+  path: string;
+  disposition: string;
+  status: string;
+} {
+  // PLACEHOLDER: This is where Path A/B/C logic will go
+  // Example logic (to be replaced):
+
+  const outcome = transcript.outcome;
+  const planType = transcript.plan_type;
+
+  // Path A: Transferred calls with Family plan
+  if (outcome === CallOutcome.TRANSFERRED && planType === "Family") {
+    return {
+      path: "PATH_A",
+      disposition: "TRANSFERRED_FAMILY",
+      status: "hot_lead",
+    };
+  }
+
+  // Path B: Transferred calls with Individual plan
+  if (outcome === CallOutcome.TRANSFERRED && planType === "Individual") {
+    return {
+      path: "PATH_B",
+      disposition: "TRANSFERRED_INDIVIDUAL",
+      status: "warm_lead",
+    };
+  }
+
+  // Path C: All other outcomes
+  return {
+    path: "PATH_C",
+    disposition: outcome,
+    status: "follow_up",
+  };
+}
