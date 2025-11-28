@@ -59,9 +59,9 @@ export function validateConfig(): void {
 
   if (missing.length > 0) {
     console.warn(
-      `⚠️  Warning: Missing environment variables: ${missing.join(", ")}`
+      ` Warning: Missing environment variables: ${missing.join(", ")}`
     );
-    console.warn("⚠️  Some features may not work correctly.");
+    console.warn(" Some features may not work correctly.");
   }
 }
 
@@ -69,7 +69,7 @@ export function validateConfig(): void {
  * Print configuration (without sensitive data)
  */
 export function printConfig(): void {
-  console.log("📋 Configuration:");
+  console.log("   Configuration:");
   console.log(`   PORT: ${config.port}`);
   console.log(`   NODE_ENV: ${config.nodeEnv}`);
   console.log(`   BLAND_BASE_URL: ${config.bland.baseUrl}`);

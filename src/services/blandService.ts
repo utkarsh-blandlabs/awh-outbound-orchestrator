@@ -61,7 +61,7 @@ class BlandService {
           // return result.data;
 
           // For now, return mock data
-          logger.warn("⚠️  STUB: Using mock Bland call response");
+          logger.warn("  STUB: Using mock Bland call response");
           return {
             call_id: `bland_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
             status: "initiated",

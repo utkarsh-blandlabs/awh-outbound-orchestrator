@@ -1,12 +1,32 @@
+// ============================================================================
+// Main Express Application
+// ============================================================================
+
 import express, { Request, Response, NextFunction } from "express";
 import { config, validateConfig, printConfig } from "./config";
 import { logger } from "./utils/logger";
 import awhWebhookRouter from "./routes/awhWebhook";
 
+// Validate environment variables
 validateConfig();
 
+// Create Express app
 const app = express();
 
+// ============================================================================
+// Middleware
+// ============================================================================
+
+// Increase timeout for long-running webhook requests
+// Bland calls can take 30 seconds to 5 minutes to complete
+app.use((req: Request, res: Response, next: NextFunction) => {
+  // Set timeout to 10 minutes (600,000 ms)
+  req.setTimeout(600000);
+  res.setTimeout(600000);
+  next();
+});
+
+// Parse JSON bodies
 app.use(express.json());
 
 // Parse URL-encoded bodies
@@ -28,6 +48,10 @@ app.use((req: Request, res: Response, next: NextFunction) => {
 
   next();
 });
+
+// ============================================================================
+// Routes
+// ============================================================================
 
 // Health check
 app.get("/health", (req: Request, res: Response) => {
@@ -63,27 +87,41 @@ app.use((err: Error, req: Request, res: Response, next: NextFunction) => {
   });
 });
 
+// ============================================================================
+// Start Server
+// ============================================================================
+
 const PORT = config.port;
 
-app.listen(PORT, () => {
+const server = app.listen(PORT, () => {
   console.log("");
-  console.log(" ============================================");
-  console.log("  AWH Outbound Orchestrator");
-  console.log(" ============================================");
-  console.log(`  Server running on port ${PORT}`);
-  console.log(`  Environment: ${config.nodeEnv}`);
-  console.log(" ============================================");
+  console.log("🚀 ============================================");
+  console.log("🚀  AWH Outbound Orchestrator");
+  console.log("🚀 ============================================");
+  console.log(`🚀  Server running on port ${PORT}`);
+  console.log(`🚀  Environment: ${config.nodeEnv}`);
+  console.log("🚀 ============================================");
   console.log("");
 
   printConfig();
 
   console.log("");
-  console.log(" Available endpoints:");
+  console.log("📡 Available endpoints:");
   console.log(`   GET  http://localhost:${PORT}/health`);
   console.log(`   POST http://localhost:${PORT}/webhooks/awhealth-outbound`);
   console.log("");
-  console.log(" Ready to receive webhooks!");
+  console.log(
+    "⏱️  Note: Webhook connections can stay open for up to 10 minutes"
+  );
+  console.log("   (waiting for Bland calls to complete)");
+  console.log("");
+  console.log("✅ Ready to receive webhooks!");
   console.log("");
 });
+
+// Set server timeout to 10 minutes (600,000 ms)
+// This allows long-running webhook requests to complete
+server.timeout = 600000;
+server.keepAliveTimeout = 610000; // Slightly longer than timeout
 
 export default app;

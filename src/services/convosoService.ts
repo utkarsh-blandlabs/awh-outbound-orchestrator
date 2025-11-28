@@ -91,7 +91,7 @@ class ConvosoService {
       const response = await retry(
         async () => {
           // TODO: Replace with actual Convoso endpoint
-          logger.warn("⚠️  STUB: Using mock Convoso find by phone");
+          logger.warn("  STUB: Using mock Convoso find by phone");
           return null;
         },
         {
@@ -118,7 +118,7 @@ class ConvosoService {
     const response = await retry(
       async () => {
         // TODO: Replace with actual Convoso endpoint
-        logger.warn("⚠️  STUB: Using mock Convoso create lead response");
+        logger.warn("  STUB: Using mock Convoso create lead response");
         return {
           lead_id: `convoso_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
           first_name: payload.first_name,
@@ -159,7 +159,7 @@ class ConvosoService {
       await retry(
         async () => {
           // TODO: Replace with actual Convoso endpoint
-          logger.warn("⚠️  STUB: Simulating Convoso call log");
+          logger.warn("  STUB: Simulating Convoso call log");
         },
         {
           maxAttempts: config.retry.maxAttempts,
@@ -204,7 +204,7 @@ class ConvosoService {
       await retry(
         async () => {
           // TODO: Replace with actual Convoso endpoint
-          logger.warn("⚠️  STUB: Simulating Convoso lead update");
+          logger.warn("  STUB: Simulating Convoso lead update");
         },
         {
           maxAttempts: config.retry.maxAttempts,
