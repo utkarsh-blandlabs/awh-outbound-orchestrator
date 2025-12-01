@@ -17,15 +17,6 @@ const app = express();
 // Middleware
 // ============================================================================
 
-// Increase timeout for long-running webhook requests
-// Bland calls can take 30 seconds to 5 minutes to complete
-app.use((req: Request, res: Response, next: NextFunction) => {
-  // Set timeout to 10 minutes (600,000 ms)
-  req.setTimeout(600000);
-  res.setTimeout(600000);
-  next();
-});
-
 // Parse JSON bodies
 app.use(express.json());
 
@@ -59,6 +50,7 @@ app.get("/health", (req: Request, res: Response) => {
     status: "ok",
     service: "awh-outbound-orchestrator",
     timestamp: new Date().toISOString(),
+    architecture: "async",
   });
 });
 
@@ -110,18 +102,13 @@ const server = app.listen(PORT, () => {
   console.log(`   GET  http://localhost:${PORT}/health`);
   console.log(`   POST http://localhost:${PORT}/webhooks/awhealth-outbound`);
   console.log("");
-  console.log(
-    "⏱️  Note: Webhook connections can stay open for up to 10 minutes"
-  );
-  console.log("   (waiting for Bland calls to complete)");
+  console.log("⚡ Architecture: ASYNC (background processing)");
+  console.log("   - Webhooks return immediately (< 1s)");
+  console.log("   - Call processing happens in background");
+  console.log("   - Results updated to Convoso when ready");
   console.log("");
   console.log("✅ Ready to receive webhooks!");
   console.log("");
 });
-
-// Set server timeout to 10 minutes (600,000 ms)
-// This allows long-running webhook requests to complete
-server.timeout = 600000;
-server.keepAliveTimeout = 610000; // Slightly longer than timeout
 
 export default app;

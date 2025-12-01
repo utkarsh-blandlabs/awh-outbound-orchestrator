@@ -16,7 +16,7 @@ const router = Router();
  * Receives webhook from Convoso when a lead fills out the form
  * Triggers the entire outbound call orchestration
  *
- * SYNCHRONOUS: Connection stays open until entire flow completes (30s - 5min)
+ * ASYNC: Returns immediately, processes in background
  */
 router.post("/awhealth-outbound", async (req: Request, res: Response) => {
   const requestId = `req_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
@@ -30,55 +30,51 @@ router.post("/awhealth-outbound", async (req: Request, res: Response) => {
     // Validate payload
     const payload = validatePayload(req.body);
 
-    // AWAIT the entire orchestration - connection stays open
-    // This can take 30 seconds to 5 minutes (waiting for call to complete)
-    logger.info(
-      "⏳ Starting synchronous orchestration (connection will stay open)",
-      {
-        request_id: requestId,
-      }
-    );
+    // Start orchestration in background (don't await!)
+    // Connection will close immediately
+    logger.info("🚀 Starting async orchestration (background processing)", {
+      request_id: requestId,
+    });
 
-    const result = await handleAwhOutbound(payload);
-
-    // Connection has been open this whole time
-    // Now we respond with the final result
-    if (result.success) {
-      logger.info("✅ Orchestration completed successfully", {
-        request_id: requestId,
-        lead_id: result.lead_id,
-        call_id: result.call_id,
-        outcome: result.outcome,
+    // Process in background - fire and forget
+    handleAwhOutbound(payload, requestId)
+      .then((result) => {
+        if (result.success) {
+          logger.info("✅ Background orchestration completed successfully", {
+            request_id: requestId,
+            lead_id: result.lead_id,
+            call_id: result.call_id,
+            outcome: result.outcome,
+          });
+        } else {
+          logger.error("❌ Background orchestration failed", {
+            request_id: requestId,
+            error: result.error,
+          });
+        }
+      })
+      .catch((error) => {
+        logger.error("💥 Unhandled error in background orchestration", {
+          request_id: requestId,
+          error: error.message,
+          stack: error.stack,
+        });
       });
 
-      res.status(200).json({
-        success: true,
-        request_id: requestId,
-        lead_id: result.lead_id,
-        call_id: result.call_id,
-        outcome: result.outcome,
-        transcript: result.transcript,
-      });
-    } else {
-      logger.error("❌ Orchestration failed", {
-        request_id: requestId,
-        error: result.error,
-      });
-
-      res.status(500).json({
-        success: false,
-        request_id: requestId,
-        error: result.error,
-      });
-    }
+    // Respond immediately - don't wait for orchestration
+    res.status(202).json({
+      success: true,
+      message: "Webhook received, processing in background",
+      request_id: requestId,
+    });
   } catch (error: any) {
-    logger.error("Webhook processing error", {
+    logger.error("Webhook validation error", {
       request_id: requestId,
       error: error.message,
       stack: error.stack,
     });
 
-    res.status(500).json({
+    res.status(400).json({
       success: false,
       error: error.message,
       request_id: requestId,
@@ -88,15 +84,18 @@ router.post("/awhealth-outbound", async (req: Request, res: Response) => {
 
 /**
  * Validate incoming webhook payload
+ * Based on actual Convoso payload structure from Jeff
  */
 function validatePayload(body: any): ConvosoWebhookPayload {
   const errors: string[] = [];
 
-  // Required fields
+  // Required fields (based on Jeff's example)
   if (!body.first_name) errors.push("first_name is required");
   if (!body.last_name) errors.push("last_name is required");
-  if (!body.phone) errors.push("phone is required");
+  if (!body.phone_number) errors.push("phone_number is required");
   if (!body.state) errors.push("state is required");
+  if (!body.lead_id) errors.push("lead_id is required");
+  if (!body.list_id) errors.push("list_id is required");
 
   if (errors.length > 0) {
     throw new Error(`Invalid payload: ${errors.join(", ")}`);
@@ -106,9 +105,17 @@ function validatePayload(body: any): ConvosoWebhookPayload {
   return {
     first_name: body.first_name,
     last_name: body.last_name,
-    phone: body.phone,
+    phone_number: body.phone_number,
     state: body.state,
     lead_id: body.lead_id,
+    list_id: body.list_id,
+    status: body.status || "NEW",
+    email: body.email,
+    address1: body.address1,
+    city: body.city,
+    postal_code: body.postal_code,
+    date_of_birth: body.date_of_birth,
+    age: body.age,
     ...body, // Include any additional fields
   };
 }

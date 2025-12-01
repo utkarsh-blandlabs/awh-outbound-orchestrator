@@ -31,11 +31,11 @@ export const config = {
     ), // 5 minutes max
   },
 
-  // Convoso API config
+  // Convoso API config (Updated with actual auth method from Jeff)
   convoso: {
-    apiKey: process.env["CONVOSO_API_KEY"] || "",
+    authToken: process.env["CONVOSO_AUTH_TOKEN"] || "",
     baseUrl: process.env["CONVOSO_BASE_URL"] || "https://api.convoso.com",
-    // TODO: Add other Convoso config as needed
+    listId: process.env["CONVOSO_LIST_ID"] || "16529", // Default list from Jeff's example
   },
 
   // Retry config
@@ -53,15 +53,15 @@ export const config = {
  * Validate required environment variables
  */
 export function validateConfig(): void {
-  const required = ["BLAND_API_KEY", "BLAND_PATHWAY_ID", "CONVOSO_API_KEY"];
+  const required = ["BLAND_API_KEY", "BLAND_PATHWAY_ID", "CONVOSO_AUTH_TOKEN"];
 
   const missing = required.filter((key) => !process.env[key]);
 
   if (missing.length > 0) {
     console.warn(
-      ` Warning: Missing environment variables: ${missing.join(", ")}`
+      `⚠️  Warning: Missing environment variables: ${missing.join(", ")}`
     );
-    console.warn(" Some features may not work correctly.");
+    console.warn("⚠️  Some features may not work correctly.");
   }
 }
 
@@ -69,11 +69,12 @@ export function validateConfig(): void {
  * Print configuration (without sensitive data)
  */
 export function printConfig(): void {
-  console.log("   Configuration:");
+  console.log("📋 Configuration:");
   console.log(`   PORT: ${config.port}`);
   console.log(`   NODE_ENV: ${config.nodeEnv}`);
   console.log(`   BLAND_BASE_URL: ${config.bland.baseUrl}`);
   console.log(`   BLAND_PATHWAY_ID: ${config.bland.pathwayId ? "✓" : "✗"}`);
   console.log(`   CONVOSO_BASE_URL: ${config.convoso.baseUrl}`);
-  console.log(`   CONVOSO_API_KEY: ${config.convoso.apiKey ? "✓" : "✗"}`);
+  console.log(`   CONVOSO_AUTH_TOKEN: ${config.convoso.authToken ? "✓" : "✗"}`);
+  console.log(`   CONVOSO_LIST_ID: ${config.convoso.listId}`);
 }

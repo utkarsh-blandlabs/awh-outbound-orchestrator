@@ -1,3 +1,9 @@
+// ============================================================================
+// Convoso Service
+// Handles all interactions with Convoso API
+// Based on actual API details from Jeff (Nov 28, 2025)
+// ============================================================================
+
 import axios, { AxiosInstance } from "axios";
 import { config } from "../config";
 import { logger } from "../utils/logger";
@@ -5,10 +11,9 @@ import { retry, isRetryableHttpError } from "../utils/retry";
 import {
   ConvosoWebhookPayload,
   ConvosoLead,
+  ConvosoLeadInsertRequest,
   ConvosoCallLogRequest,
-  ConvosoLeadUpdateRequest,
   BlandTranscript,
-  CallOutcome,
 } from "../types/awh";
 
 class ConvosoService {
@@ -17,82 +22,113 @@ class ConvosoService {
   constructor() {
     this.client = axios.create({
       baseURL: config.convoso.baseUrl,
-      headers: {
-        Authorization: `Bearer ${config.convoso.apiKey}`,
-        "Content-Type": "application/json",
-      },
       timeout: 30000,
     });
   }
 
-  async getOrCreateLead(payload: ConvosoWebhookPayload): Promise<ConvosoLead> {
-    logger.info("Getting or creating Convoso lead", {
-      phone: payload.phone,
+  /**
+   * Insert or update a lead in Convoso
+   * Uses /v1/leads/insert endpoint
+   * Auth via query parameter
+   */
+  async insertOrUpdateLead(
+    payload: ConvosoWebhookPayload
+  ): Promise<ConvosoLead> {
+    logger.info("Inserting/updating Convoso lead", {
+      phone_number: payload.phone_number,
       name: `${payload.first_name} ${payload.last_name}`,
-      existing_lead_id: payload.lead_id,
+      lead_id: payload.lead_id,
     });
 
+    const requestData: ConvosoLeadInsertRequest = {
+      auth_token: config.convoso.authToken,
+      list_id: payload.list_id || config.convoso.listId,
+      phone_number: payload.phone_number,
+      first_name: payload.first_name,
+      last_name: payload.last_name,
+      date_of_birth: payload.date_of_birth,
+      city: payload.city,
+      state: payload.state,
+      postal_code: payload.postal_code,
+      lead_id: payload.lead_id,
+      status: payload.status || "NEW",
+    };
+
     try {
-      if (payload.lead_id) {
-        try {
-          const lead = await this.getLead(payload.lead_id);
-          logger.info("Found existing lead", { lead_id: lead.lead_id });
-          return lead;
-        } catch (error) {
-          logger.warn("Lead ID provided but not found, will create new lead", {
-            lead_id: payload.lead_id,
+      const response = await retry(
+        async () => {
+          // Real Convoso API call
+          const result = await this.client.post("/v1/leads/insert", null, {
+            params: requestData,
           });
+          return result.data;
+        },
+        {
+          maxAttempts: config.retry.maxAttempts,
+          shouldRetry: isRetryableHttpError,
         }
-      }
+      );
 
-      const existingLead = await this.findLeadByPhone(payload.phone);
-      if (existingLead) {
-        logger.info("Found existing lead by phone", {
-          lead_id: existingLead.lead_id,
-        });
-        return existingLead;
-      }
+      const lead: ConvosoLead = {
+        lead_id: response.lead_id || payload.lead_id,
+        first_name: payload.first_name,
+        last_name: payload.last_name,
+        phone_number: payload.phone_number,
+        state: payload.state,
+        city: payload.city,
+        postal_code: payload.postal_code,
+        date_of_birth: payload.date_of_birth,
+        list_id: payload.list_id || config.convoso.listId,
+        status: payload.status || "NEW",
+      };
 
-      return await this.createLead(payload);
+      logger.info("Lead inserted/updated successfully", {
+        lead_id: lead.lead_id,
+      });
+      return lead;
     } catch (error: any) {
-      logger.error("Failed to get or create lead", {
+      logger.error("Failed to insert/update lead in Convoso", {
         error: error.message,
-        phone: payload.phone,
+        response: error.response?.data,
+        phone_number: payload.phone_number,
       });
       throw new Error(`Convoso API error: ${error.message}`);
     }
   }
 
-  private async getLead(leadId: string): Promise<ConvosoLead> {
-    const response = await retry(
-      async () => {
-        // TODO: Replace with actual Convoso endpoint
-        logger.warn("⚠️  STUB: Using mock Convoso lead response");
-        return {
-          lead_id: leadId,
-          first_name: "Mock",
-          last_name: "Lead",
-          phone: "5551234567",
-          state: "CA",
-          status: "active",
-        };
-      },
-      {
-        maxAttempts: config.retry.maxAttempts,
-        shouldRetry: isRetryableHttpError,
-      }
-    );
+  /**
+   * Update call log with transcript
+   * Uses /v1/log/update endpoint
+   * This is how Convoso receives call outcomes and transcripts
+   */
+  async updateCallLog(
+    leadId: string,
+    phoneNumber: string,
+    transcript: BlandTranscript
+  ): Promise<void> {
+    logger.info("Updating Convoso call log", {
+      lead_id: leadId,
+      phone_number: phoneNumber,
+      outcome: transcript.outcome,
+    });
 
-    return response;
-  }
+    // Format transcript for Convoso
+    const callTranscript = this.formatTranscriptForConvoso(transcript);
 
-  private async findLeadByPhone(phone: string): Promise<ConvosoLead | null> {
+    const requestData: ConvosoCallLogRequest = {
+      auth_token: config.convoso.authToken,
+      phone_number: phoneNumber,
+      lead_id: leadId,
+      call_transcript: callTranscript,
+    };
+
     try {
-      const response = await retry(
+      await retry(
         async () => {
-          // TODO: Replace with actual Convoso endpoint
-          logger.warn("  STUB: Using mock Convoso find by phone");
-          return null;
+          // Real Convoso API call
+          await this.client.post("/v1/log/update", null, {
+            params: requestData,
+          });
         },
         {
           maxAttempts: config.retry.maxAttempts,
@@ -100,189 +136,89 @@ class ConvosoService {
         }
       );
 
-      return response;
-    } catch (error) {
-      logger.debug("Lead not found by phone", { phone });
-      return null;
+      logger.info("Call log updated successfully", {
+        lead_id: leadId,
+        outcome: transcript.outcome,
+      });
+    } catch (error: any) {
+      logger.error("Failed to update call log in Convoso", {
+        error: error.message,
+        response: error.response?.data,
+        lead_id: leadId,
+      });
+      throw new Error(`Convoso log update error: ${error.message}`);
     }
   }
 
-  private async createLead(
-    payload: ConvosoWebhookPayload
-  ): Promise<ConvosoLead> {
-    logger.info("Creating new Convoso lead", {
-      phone: payload.phone,
-      name: `${payload.first_name} ${payload.last_name}`,
-    });
+  /**
+   * Format Bland transcript for Convoso
+   * Creates a human-readable summary
+   */
+  private formatTranscriptForConvoso(transcript: BlandTranscript): string {
+    const parts: string[] = [];
 
-    const response = await retry(
-      async () => {
-        // TODO: Replace with actual Convoso endpoint
-        logger.warn("  STUB: Using mock Convoso create lead response");
-        return {
-          lead_id: `convoso_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
-          first_name: payload.first_name,
-          last_name: payload.last_name,
-          phone: payload.phone,
-          state: payload.state,
-          status: "new",
-        };
-      },
-      {
-        maxAttempts: config.retry.maxAttempts,
-        shouldRetry: isRetryableHttpError,
-      }
-    );
+    // Call outcome
+    parts.push(`Call Outcome: ${transcript.outcome}`);
 
-    logger.info("Lead created successfully", { lead_id: response.lead_id });
-    return response;
+    // Plan details if available
+    if (transcript.plan_type) {
+      parts.push(`Plan Type: ${transcript.plan_type}`);
+    }
+    if (transcript.member_count) {
+      parts.push(`Members: ${transcript.member_count}`);
+    }
+    if (transcript.zip) {
+      parts.push(`ZIP: ${transcript.zip}`);
+    }
+    if (transcript.state) {
+      parts.push(`State: ${transcript.state}`);
+    }
+
+    // Call duration
+    if (transcript.duration) {
+      parts.push(`Duration: ${transcript.duration}s`);
+    }
+
+    // Full transcript
+    parts.push(`\n--- Transcript ---\n${transcript.transcript}`);
+
+    return parts.join("\n");
   }
 
+  /**
+   * Legacy method name for compatibility
+   * Now just calls insertOrUpdateLead
+   */
+  async getOrCreateLead(payload: ConvosoWebhookPayload): Promise<ConvosoLead> {
+    return this.insertOrUpdateLead(payload);
+  }
+
+  /**
+   * Log call - now part of updateCallLog
+   * Keeping for backwards compatibility during transition
+   */
   async logCall(
     leadId: string,
     callId: string,
     phoneNumber: string
   ): Promise<void> {
-    logger.info("Logging call in Convoso", {
+    logger.info("Call logging now handled by updateCallLog with transcript", {
       lead_id: leadId,
       call_id: callId,
     });
-
-    const callLogData: ConvosoCallLogRequest = {
-      lead_id: leadId,
-      call_id: callId,
-      phone_number: phoneNumber,
-      timestamp: new Date().toISOString(),
-    };
-
-    try {
-      await retry(
-        async () => {
-          // TODO: Replace with actual Convoso endpoint
-          logger.warn("  STUB: Simulating Convoso call log");
-        },
-        {
-          maxAttempts: config.retry.maxAttempts,
-          shouldRetry: isRetryableHttpError,
-        }
-      );
-
-      logger.info("Call logged successfully", { lead_id: leadId });
-    } catch (error: any) {
-      logger.error("Failed to log call in Convoso", {
-        error: error.message,
-        lead_id: leadId,
-        call_id: callId,
-      });
-    }
+    // This is now a no-op - actual logging happens in updateCallLog with transcript
   }
 
+  /**
+   * Update lead from outcome - now uses updateCallLog
+   * Keeping for backwards compatibility
+   */
   async updateLeadFromOutcome(
     leadId: string,
+    phoneNumber: string,
     transcript: BlandTranscript
   ): Promise<void> {
-    logger.info("Updating Convoso lead with outcome", {
-      lead_id: leadId,
-      outcome: transcript.outcome,
-    });
-
-    const { disposition, status, notes } = this.mapOutcomeToConvoso(transcript);
-
-    const updateData: ConvosoLeadUpdateRequest = {
-      lead_id: leadId,
-      status,
-      disposition,
-      notes,
-      plan_type: transcript.plan_type,
-      member_count: transcript.member_count,
-      zip: transcript.zip,
-      state: transcript.state,
-      transcript: transcript.transcript,
-    };
-
-    try {
-      await retry(
-        async () => {
-          // TODO: Replace with actual Convoso endpoint
-          logger.warn("  STUB: Simulating Convoso lead update");
-        },
-        {
-          maxAttempts: config.retry.maxAttempts,
-          shouldRetry: isRetryableHttpError,
-        }
-      );
-
-      logger.info("Lead updated successfully", {
-        lead_id: leadId,
-        status,
-        disposition,
-      });
-    } catch (error: any) {
-      logger.error("Failed to update lead in Convoso", {
-        error: error.message,
-        lead_id: leadId,
-      });
-      throw new Error(`Convoso update error: ${error.message}`);
-    }
-  }
-
-  private mapOutcomeToConvoso(transcript: BlandTranscript): {
-    disposition: string;
-    status: string;
-    notes: string;
-  } {
-    const outcome = transcript.outcome;
-
-    switch (outcome) {
-      case CallOutcome.TRANSFERRED:
-        return {
-          disposition: "TRANSFERRED",
-          status: "hot_lead",
-          notes: `Call transferred. Plan: ${transcript.plan_type || "Unknown"}, Members: ${transcript.member_count || "Unknown"}`,
-        };
-
-      case CallOutcome.VOICEMAIL:
-        return {
-          disposition: "VOICEMAIL",
-          status: "follow_up",
-          notes: "Voicemail left. Follow-up needed.",
-        };
-
-      case CallOutcome.CALLBACK:
-        return {
-          disposition: "CALLBACK_REQUESTED",
-          status: "callback",
-          notes: "Customer requested callback.",
-        };
-
-      case CallOutcome.NO_ANSWER:
-        return {
-          disposition: "NO_ANSWER",
-          status: "retry",
-          notes: "No answer. Will retry.",
-        };
-
-      case CallOutcome.BUSY:
-        return {
-          disposition: "BUSY",
-          status: "retry",
-          notes: "Line busy. Will retry.",
-        };
-
-      case CallOutcome.FAILED:
-        return {
-          disposition: "FAILED",
-          status: "dead",
-          notes: "Call failed.",
-        };
-
-      default:
-        return {
-          disposition: "UNKNOWN",
-          status: "review",
-          notes: "Call outcome unknown. Needs review.",
-        };
-    }
+    return this.updateCallLog(leadId, phoneNumber, transcript);
   }
 }
 

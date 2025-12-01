@@ -1,7 +1,7 @@
 // ============================================================================
-// Convoso Service
-// Handles all interactions with Convoso API
-// =======================================
+// AWH Orchestrator
+// Coordinates the entire outbound call flow
+// ============================================================================
 
 import { logger } from "../utils/logger";
 import { blandService } from "../services/blandService";
@@ -19,16 +19,18 @@ import {
  * 1. Get or create lead in Convoso
  * 2. Trigger Bland outbound call
  * 3. Log call in Convoso
- * 4. Poll Bland for transcript
+ * 4. Poll Bland for transcript (async, in background)
  * 5. Update Convoso lead with outcome
  */
 export async function handleAwhOutbound(
-  payload: ConvosoWebhookPayload
+  payload: ConvosoWebhookPayload,
+  requestId?: string
 ): Promise<OrchestrationResult> {
   const startTime = Date.now();
 
-  logger.info("Starting AWH outbound orchestration", {
-    phone: payload.phone,
+  logger.info("🚀 Starting AWH outbound orchestration", {
+    request_id: requestId,
+    phone: payload.phone_number,
     name: `${payload.first_name} ${payload.last_name}`,
     state: payload.state,
   });
@@ -37,39 +39,39 @@ export async function handleAwhOutbound(
     // ========================================================================
     // STEP 1: Get or create lead in Convoso
     // ========================================================================
-    logger.info("Step 1: Getting or creating Convoso lead");
+    logger.info("📋 Step 1: Getting or creating Convoso lead");
     const lead = await convosoService.getOrCreateLead(payload);
 
-    logger.info("Lead ready", { lead_id: lead.lead_id });
+    logger.info("✓ Lead ready", { lead_id: lead.lead_id });
 
     // ========================================================================
     // STEP 2: Trigger Bland outbound call
     // ========================================================================
-    logger.info("Step 2: Triggering Bland outbound call");
+    logger.info("📞 Step 2: Triggering Bland outbound call");
     const callResponse = await blandService.sendOutboundCall({
-      phoneNumber: payload.phone,
+      phoneNumber: payload.phone_number,
       firstName: payload.first_name,
       lastName: payload.last_name,
     });
 
-    logger.info("Call initiated", { call_id: callResponse.call_id });
+    logger.info("✓ Call initiated", { call_id: callResponse.call_id });
 
     // ========================================================================
     // STEP 3: Log call in Convoso
     // ========================================================================
-    logger.info("Step 3: Logging call in Convoso");
+    logger.info("📝 Step 3: Logging call in Convoso");
     await convosoService.logCall(
       lead.lead_id,
       callResponse.call_id,
-      payload.phone
+      payload.phone_number
     );
 
-    logger.info("Call logged");
+    logger.info("✓ Call logged");
 
     // ========================================================================
     // STEP 4: Poll Bland for transcript
     // ========================================================================
-    logger.info("Step 4: Waiting for Bland transcript");
+    logger.info("⏳ Step 4: Waiting for Bland transcript");
     const transcript = await blandService.getTranscript(callResponse.call_id);
 
     logger.info("✓ Transcript received", {
@@ -81,20 +83,25 @@ export async function handleAwhOutbound(
     // ========================================================================
     // STEP 5: Apply path logic and update Convoso lead
     // ========================================================================
-    logger.info("Step 5: Applying path logic and updating lead");
+    logger.info("🔀 Step 5: Applying path logic and updating lead");
 
     // TODO: Implement actual Path A/B/C logic once you have the rules
     // For now, we just update based on outcome
-    await convosoService.updateLeadFromOutcome(lead.lead_id, transcript);
+    await convosoService.updateLeadFromOutcome(
+      lead.lead_id,
+      lead.phone_number,
+      transcript
+    );
 
-    logger.info("Lead updated");
+    logger.info("✓ Lead updated");
 
     // ========================================================================
     // Success!
     // ========================================================================
     const duration = Date.now() - startTime;
 
-    logger.info("AWH orchestration completed successfully", {
+    logger.info("✅ AWH orchestration completed successfully", {
+      request_id: requestId,
       lead_id: lead.lead_id,
       call_id: callResponse.call_id,
       outcome: transcript.outcome,
@@ -111,11 +118,12 @@ export async function handleAwhOutbound(
   } catch (error: any) {
     const duration = Date.now() - startTime;
 
-    logger.error("AWH orchestration failed", {
+    logger.error("❌ AWH orchestration failed", {
+      request_id: requestId,
       error: error.message,
       stack: error.stack,
       duration_ms: duration,
-      phone: payload.phone,
+      phone: payload.phone_number,
     });
 
     return {
