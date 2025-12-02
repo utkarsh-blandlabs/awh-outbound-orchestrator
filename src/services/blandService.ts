@@ -168,7 +168,7 @@ class BlandService {
         // Check if call is completed
         if (response.completed === true && response.status === "completed") {
           // Log full raw response from Bland
-          logger.info("📝 Bland API - Full Transcript Response (RAW)", {
+          logger.debug("📝 Bland API - Full Transcript Response (RAW)", {
             full_response: response,
           });
 
