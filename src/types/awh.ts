@@ -30,15 +30,37 @@ export interface ConvosoWebhookPayload {
 
 /**
  * Payload to send to Bland for outbound call
+ * Based on Bland API: POST /v1/calls
+ * Matching Zapier configuration
  */
 export interface BlandOutboundCallRequest {
   phone_number: string;
-  pathway_id: string;
-  start_node_id?: string;
-  from_number?: string;
+  pathway_id?: string;
+  task?: string;
+  from?: string;
   transfer_phone_number?: string;
+  start_node_id?: string;
+
+  // Voice and behavior
+  voice?: string;
+  max_duration?: number;
+  amd?: boolean; // Answering machine detection
+  wait_for_greeting?: boolean;
+  block_interruptions?: boolean;
+  record?: boolean;
+  wait?: boolean;
+  language?: string;
+
+  // First sentence
+  first_sentence?: string;
+
+  // Voicemail settings
   voicemail_message?: string;
-  caller_id?: string;
+  voicemail_action?: "leave_message" | "hangup";
+
+  // Other options
+  model?: "base" | "turbo";
+  reduce_latency?: boolean;
   [key: string]: any;
 }
 
@@ -66,16 +88,24 @@ export enum CallOutcome {
 
 /**
  * Parsed transcript data from Bland
+ * Based on Bland API: GET /v1/calls/{call_id} response
  */
 export interface BlandTranscript {
   call_id: string;
   transcript: string;
   outcome: CallOutcome;
+  // Custom extracted variables
   plan_type?: "Individual" | "Family";
   member_count?: number;
   zip?: string;
   state?: string;
   duration?: number;
+  // Additional Bland API fields
+  summary?: string;
+  answered_by?: string;
+  call_ended_by?: string;
+  completed?: boolean;
+  status?: string;
   [key: string]: any;
 }
 

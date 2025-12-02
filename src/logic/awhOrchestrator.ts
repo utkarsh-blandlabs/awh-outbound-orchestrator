@@ -1,6 +1,6 @@
 // ============================================================================
 // AWH Orchestrator
-// Coordinates the entire outbound call flow
+// Coordinates the entire outbound call flow with modular stage handling
 // ============================================================================
 
 import { logger } from "../utils/logger";
@@ -10,23 +10,44 @@ import {
   ConvosoWebhookPayload,
   OrchestrationResult,
   CallOutcome,
+  ConvosoLead,
+  BlandOutboundCallResponse,
+  BlandTranscript,
 } from "../types/awh";
 
 /**
+ * Orchestration stages for tracking progress
+ */
+enum OrchestrationStage {
+  INIT = "INIT",
+  CONVOSO_LEAD = "CONVOSO_LEAD",
+  BLAND_CALL = "BLAND_CALL",
+  CONVOSO_LOG = "CONVOSO_LOG",
+  BLAND_TRANSCRIPT = "BLAND_TRANSCRIPT",
+  CONVOSO_UPDATE = "CONVOSO_UPDATE",
+  COMPLETE = "COMPLETE",
+}
+
+/**
+ * Stage result interface for better error tracking
+ */
+interface StageResult<T> {
+  success: boolean;
+  data?: T;
+  error?: string;
+  stage: OrchestrationStage;
+  duration_ms: number;
+}
+
+/**
  * Main orchestration function for AWH outbound flow
- *
- * Flow:
- * 1. Get or create lead in Convoso
- * 2. Trigger Bland outbound call
- * 3. Log call in Convoso
- * 4. Poll Bland for transcript (async, in background)
- * 5. Update Convoso lead with outcome
  */
 export async function handleAwhOutbound(
   payload: ConvosoWebhookPayload,
   requestId?: string
 ): Promise<OrchestrationResult> {
   const startTime = Date.now();
+  let currentStage = OrchestrationStage.INIT;
 
   logger.info("🚀 Starting AWH outbound orchestration", {
     request_id: requestId,
@@ -36,76 +57,93 @@ export async function handleAwhOutbound(
   });
 
   try {
-    // ========================================================================
-    // STEP 1: Get or create lead in Convoso
-    // ========================================================================
-    logger.info("📋 Step 1: Getting or creating Convoso lead");
-    const lead = await convosoService.getOrCreateLead(payload);
-
-    logger.info("✓ Lead ready", { lead_id: lead.lead_id });
-
-    // ========================================================================
-    // STEP 2: Trigger Bland outbound call
-    // ========================================================================
-    logger.info("📞 Step 2: Triggering Bland outbound call");
-    const callResponse = await blandService.sendOutboundCall({
-      phoneNumber: payload.phone_number,
-      firstName: payload.first_name,
-      lastName: payload.last_name,
-    });
-
-    logger.info("✓ Call initiated", { call_id: callResponse.call_id });
-
-    // ========================================================================
-    // STEP 3: Log call in Convoso
-    // ========================================================================
-    logger.info("📝 Step 3: Logging call in Convoso");
-    await convosoService.logCall(
-      lead.lead_id,
-      callResponse.call_id,
-      payload.phone_number
+    // Stage 1: Get or create lead in Convoso
+    const leadResult = await executeStage(
+      OrchestrationStage.CONVOSO_LEAD,
+      () => getOrCreateLead(payload),
+      requestId
     );
+    if (!leadResult.success || !leadResult.data) {
+      throw new Error(
+        `Stage ${OrchestrationStage.CONVOSO_LEAD} failed: ${leadResult.error}`
+      );
+    }
+    currentStage = OrchestrationStage.CONVOSO_LEAD;
+    const lead = leadResult.data;
 
-    logger.info("✓ Call logged");
-
-    // ========================================================================
-    // STEP 4: Poll Bland for transcript
-    // ========================================================================
-    logger.info("⏳ Step 4: Waiting for Bland transcript");
-    const transcript = await blandService.getTranscript(callResponse.call_id);
-
-    logger.info("✓ Transcript received", {
-      outcome: transcript.outcome,
-      plan_type: transcript.plan_type,
-      member_count: transcript.member_count,
-    });
-
-    // ========================================================================
-    // STEP 5: Apply path logic and update Convoso lead
-    // ========================================================================
-    logger.info("🔀 Step 5: Applying path logic and updating lead");
-
-    // TODO: Implement actual Path A/B/C logic once you have the rules
-    // For now, we just update based on outcome
-    await convosoService.updateLeadFromOutcome(
-      lead.lead_id,
-      lead.phone_number,
-      transcript
+    // Stage 2: Trigger Bland outbound call
+    const callResult = await executeStage(
+      OrchestrationStage.BLAND_CALL,
+      () => triggerOutboundCall(payload),
+      requestId
     );
+    if (!callResult.success || !callResult.data) {
+      throw new Error(
+        `Stage ${OrchestrationStage.BLAND_CALL} failed: ${callResult.error}`
+      );
+    }
+    currentStage = OrchestrationStage.BLAND_CALL;
+    const callResponse = callResult.data;
 
-    logger.info("✓ Lead updated");
+    // Stage 3: Log call in Convoso (non-blocking)
+    const logResult = await executeStage(
+      OrchestrationStage.CONVOSO_LOG,
+      () =>
+        convosoService.logCall(
+          lead.lead_id,
+          callResponse.call_id,
+          payload.phone_number
+        ),
+      requestId
+    );
+    if (!logResult.success) {
+      logger.warn("⚠️ Call logging failed, but continuing", {
+        error: logResult.error,
+      });
+    }
+    currentStage = OrchestrationStage.CONVOSO_LOG;
 
-    // ========================================================================
+    // Stage 4: Poll Bland for transcript
+    const transcriptResult = await executeStage(
+      OrchestrationStage.BLAND_TRANSCRIPT,
+      () => getTranscript(callResponse.call_id),
+      requestId
+    );
+    if (!transcriptResult.success || !transcriptResult.data) {
+      throw new Error(
+        `Stage ${OrchestrationStage.BLAND_TRANSCRIPT} failed: ${transcriptResult.error}`
+      );
+    }
+    currentStage = OrchestrationStage.BLAND_TRANSCRIPT;
+    const transcript = transcriptResult.data;
+
+    // Stage 5: Update Convoso with transcript and outcome
+    const updateResult = await executeStage(
+      OrchestrationStage.CONVOSO_UPDATE,
+      () =>
+        convosoService.updateLeadFromOutcome(
+          lead.lead_id,
+          lead.phone_number,
+          transcript
+        ),
+      requestId
+    );
+    if (!updateResult.success) {
+      logger.warn("⚠️ Lead update failed, but call completed", {
+        error: updateResult.error,
+      });
+    }
+    currentStage = OrchestrationStage.CONVOSO_UPDATE;
+
     // Success!
-    // ========================================================================
     const duration = Date.now() - startTime;
-
     logger.info("✅ AWH orchestration completed successfully", {
       request_id: requestId,
       lead_id: lead.lead_id,
       call_id: callResponse.call_id,
       outcome: transcript.outcome,
       duration_ms: duration,
+      stages_completed: currentStage,
     });
 
     return {
@@ -120,6 +158,7 @@ export async function handleAwhOutbound(
 
     logger.error("❌ AWH orchestration failed", {
       request_id: requestId,
+      failed_at_stage: currentStage,
       error: error.message,
       stack: error.stack,
       duration_ms: duration,
@@ -131,9 +170,105 @@ export async function handleAwhOutbound(
       lead_id: "",
       call_id: "",
       outcome: CallOutcome.FAILED,
-      error: error.message,
+      error: `Failed at stage ${currentStage}: ${error.message}`,
     };
   }
+}
+
+/**
+ * Execute a stage with error handling and timing
+ */
+async function executeStage<T>(
+  stage: OrchestrationStage,
+  fn: () => Promise<T>,
+  requestId?: string
+): Promise<StageResult<T>> {
+  const stageStart = Date.now();
+  const stageEmoji = getStageEmoji(stage);
+
+  logger.info(`${stageEmoji} Stage: ${stage} - Starting`, {
+    request_id: requestId,
+    stage,
+  });
+
+  try {
+    const result = await fn();
+    const duration = Date.now() - stageStart;
+
+    logger.info(`✓ Stage: ${stage} - Completed`, {
+      request_id: requestId,
+      stage,
+      duration_ms: duration,
+    });
+
+    return {
+      success: true,
+      data: result,
+      stage,
+      duration_ms: duration,
+    };
+  } catch (error: any) {
+    const duration = Date.now() - stageStart;
+
+    logger.error(`✗ Stage: ${stage} - Failed`, {
+      request_id: requestId,
+      stage,
+      error: error.message,
+      duration_ms: duration,
+    });
+
+    return {
+      success: false,
+      error: error.message,
+      stage,
+      duration_ms: duration,
+    };
+  }
+}
+
+/**
+ * Get emoji for each stage
+ */
+function getStageEmoji(stage: OrchestrationStage): string {
+  const emojiMap: Record<OrchestrationStage, string> = {
+    [OrchestrationStage.INIT]: "🚀",
+    [OrchestrationStage.CONVOSO_LEAD]: "📋",
+    [OrchestrationStage.BLAND_CALL]: "📞",
+    [OrchestrationStage.CONVOSO_LOG]: "📝",
+    [OrchestrationStage.BLAND_TRANSCRIPT]: "⏳",
+    [OrchestrationStage.CONVOSO_UPDATE]: "🔀",
+    [OrchestrationStage.COMPLETE]: "✅",
+  };
+  return emojiMap[stage] || "•";
+}
+
+/**
+ * Stage 1: Get or create lead in Convoso
+ */
+async function getOrCreateLead(
+  payload: ConvosoWebhookPayload
+): Promise<ConvosoLead> {
+  return await convosoService.getOrCreateLead(payload);
+}
+
+/**
+ * Stage 2: Trigger Bland outbound call
+ */
+async function triggerOutboundCall(
+  payload: ConvosoWebhookPayload
+): Promise<BlandOutboundCallResponse> {
+  return await blandService.sendOutboundCall({
+    phoneNumber: payload.phone_number,
+    firstName: payload.first_name,
+    lastName: payload.last_name,
+  });
+}
+
+/**
+ * Stage 4: Get transcript from Bland
+ */
+async function getTranscript(callId: string): Promise<BlandTranscript> {
+  return await blandService.getTranscript(callId);
 }
 
 /**

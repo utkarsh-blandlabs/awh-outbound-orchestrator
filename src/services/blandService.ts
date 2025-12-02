@@ -30,6 +30,7 @@ class BlandService {
 
   /**
    * Send an outbound call via Bland
+   * Real Bland API: POST /v1/calls
    */
   async sendOutboundCall(payload: {
     phoneNumber: string;
@@ -41,31 +42,71 @@ class BlandService {
       name: `${payload.firstName} ${payload.lastName}`,
     });
 
+    // Build dynamic task and first sentence with customer's name
+    const task = config.bland.taskTemplate
+      ? config.bland.taskTemplate
+          .replace(/\{\{first_name\}\}/g, payload.firstName)
+          .replace(/\{\{last_name\}\}/g, payload.lastName)
+      : undefined;
+
+    const firstSentence = config.bland.firstSentenceTemplate
+      ? config.bland.firstSentenceTemplate
+          .replace(/\{\{first_name\}\}/g, payload.firstName)
+          .replace(/\{\{last_name\}\}/g, payload.lastName)
+      : undefined;
+
+    // Build request body matching Zapier configuration
     const requestBody: BlandOutboundCallRequest = {
       phone_number: payload.phoneNumber,
-      pathway_id: config.bland.pathwayId,
-      start_node_id: config.bland.startNodeId,
-      from_number: config.bland.fromNumber,
-      transfer_phone_number: config.bland.transferNumber,
+
+      // Core settings
+      ...(config.bland.pathwayId && { pathway_id: config.bland.pathwayId }),
+      ...(config.bland.startNodeId && {
+        start_node_id: config.bland.startNodeId,
+      }),
+      ...(task && { task }),
+
+      // Phone numbers
+      ...(config.bland.from && { from: config.bland.from }),
+      ...(config.bland.transferPhoneNumber && {
+        transfer_phone_number: config.bland.transferPhoneNumber,
+      }),
+
+      // Voice and behavior
+      ...(config.bland.voiceId && { voice: config.bland.voiceId }),
+      max_duration: config.bland.maxDuration,
+      amd: config.bland.answeringMachineDetection,
+      wait_for_greeting: config.bland.waitForGreeting,
+      block_interruptions: config.bland.blockInterruptions,
+      record: config.bland.record,
+
+      // First sentence
+      ...(firstSentence && { first_sentence: firstSentence }),
+
+      // Voicemail settings
       voicemail_message: config.bland.voicemailMessage,
-      caller_id: payload.phoneNumber, // Use customer's phone as caller ID
+      ...(config.bland.voicemailAction && {
+        voicemail_action: config.bland.voicemailAction as
+          | "leave_message"
+          | "hangup",
+      }),
+
+      // Additional settings
+      language: "eng",
+      wait: false, // Don't wait for call to complete (async)
     };
 
+    // Log the request body being sent to Bland
+    logger.debug("📤 Bland API Request Body", {
+      request_body: requestBody,
+    });
+
     try {
-      // TODO: Replace with actual Bland endpoint once you have it
-      // Expected endpoint: POST /v1/calls or similar
       const response = await retry(
         async () => {
-          // STUB: This is where the real API call goes
-          // const result = await this.client.post('/v1/calls', requestBody);
-          // return result.data;
-
-          // For now, return mock data
-          logger.warn("  STUB: Using mock Bland call response");
-          return {
-            call_id: `bland_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
-            status: "initiated",
-          };
+          // Real Bland API call
+          const result = await this.client.post("/v1/calls", requestBody);
+          return result.data;
         },
         {
           maxAttempts: config.retry.maxAttempts,
@@ -73,14 +114,26 @@ class BlandService {
         }
       );
 
-      logger.info("Bland call initiated successfully", {
+      // Log full Bland call initiation response
+      logger.debug("📞 Bland API - Call Initiation Response", {
+        full_response: response,
         call_id: response.call_id,
+        status: response.status,
       });
 
-      return response;
+      logger.info("Bland call initiated successfully", {
+        call_id: response.call_id,
+        status: response.status,
+      });
+
+      return {
+        call_id: response.call_id,
+        status: response.status || "success",
+      };
     } catch (error: any) {
       logger.error("Failed to send outbound call to Bland", {
         error: error.message,
+        response: error.response?.data,
         phone: payload.phoneNumber,
       });
       throw new Error(`Bland API error: ${error.message}`);
@@ -89,7 +142,8 @@ class BlandService {
 
   /**
    * Get transcript and outcome from Bland
-   * Polls until transcript is ready
+   * Real Bland API: GET /v1/calls/{call_id}
+   * Polls until call is completed
    */
   async getTranscript(callId: string): Promise<BlandTranscript> {
     logger.info("Fetching transcript from Bland", { call_id: callId });
@@ -99,33 +153,11 @@ class BlandService {
 
     for (let attempt = 1; attempt <= maxAttempts; attempt++) {
       try {
-        // TODO: Replace with actual Bland endpoint once you have it
-        // Expected endpoint: GET /v1/calls/{callId}/transcript or similar
         const response = await retry(
           async () => {
-            // STUB: This is where the real API call goes
-            // const result = await this.client.get(`/v1/calls/${callId}/transcript`);
-            // return result.data;
-
-            // For now, return mock data after a few attempts (simulate call in progress)
-            if (attempt < 3) {
-              logger.debug("Transcript not ready yet, will retry", { attempt });
-              throw new Error("Transcript not ready");
-            }
-
-            logger.warn("⚠️  STUB: Using mock Bland transcript response");
-            return {
-              call_id: callId,
-              status: "completed",
-              transcript:
-                "Mock transcript: Customer interested in family plan...",
-              outcome: "transferred",
-              plan_type: "Family",
-              member_count: 4,
-              zip: "90210",
-              state: "CA",
-              duration: 180,
-            };
+            // Real Bland API call
+            const result = await this.client.get(`/v1/calls/${callId}`);
+            return result.data;
           },
           {
             maxAttempts: 1, // No retries within each poll attempt
@@ -133,20 +165,30 @@ class BlandService {
           }
         );
 
-        // Check if transcript is ready
-        if (response.status === "completed" || response.transcript) {
+        // Check if call is completed
+        if (response.completed === true && response.status === "completed") {
+          // Log full raw response from Bland
+          logger.info("📝 Bland API - Full Transcript Response (RAW)", {
+            full_response: response,
+          });
+
           const parsedTranscript = this.parseTranscript(response);
+
           logger.info("Transcript retrieved successfully", {
             call_id: callId,
             outcome: parsedTranscript.outcome,
+            duration: response.call_length,
           });
+
           return parsedTranscript;
         }
 
-        // Transcript not ready, wait and retry
-        logger.debug("Transcript not ready, polling again", {
+        // Call not completed yet, wait and retry
+        logger.debug("Call not completed yet, polling again", {
           attempt,
           maxAttempts,
+          status: response.status,
+          completed: response.completed,
         });
 
         await this.sleep(pollInterval);
@@ -156,11 +198,16 @@ class BlandService {
           logger.error("Failed to get transcript after max attempts", {
             call_id: callId,
             attempts: maxAttempts,
+            error: error.message,
           });
           throw new Error("Transcript polling timeout");
         }
 
         // Otherwise, wait and retry
+        logger.warn("Error fetching transcript, will retry", {
+          attempt,
+          error: error.message,
+        });
         await this.sleep(pollInterval);
       }
     }
@@ -169,41 +216,85 @@ class BlandService {
   }
 
   /**
-   * Parse raw Bland transcript response into normalized format
+   * Parse raw Bland API response into normalized format
+   * Based on actual Bland API /v1/calls/{call_id} response
    */
   private parseTranscript(raw: any): BlandTranscript {
-    // TODO: Adjust this based on actual Bland response format
-    const outcome = this.mapOutcome(raw.outcome || raw.call_status);
+    // Log raw response for debugging
+    logger.debug("Raw Bland transcript response", {
+      call_id: raw.call_id,
+      status: raw.status,
+      completed: raw.completed,
+      answered_by: raw.answered_by,
+      call_ended_by: raw.call_ended_by,
+      warm_transfer: raw.warm_transfer_call,
+      error_message: raw.error_message,
+    });
+
+    // Extract outcome from call status and answered_by
+    const outcome = this.determineOutcome(raw);
+
+    // Extract variables (custom data from call)
+    const variables = raw.variables || {};
 
     return {
-      call_id: raw.call_id,
-      transcript: raw.transcript || "",
+      call_id: raw.call_id || raw.c_id,
+      transcript: raw.concatenated_transcript || "",
       outcome,
-      plan_type: raw.plan_type,
-      member_count: raw.member_count,
-      zip: raw.zip,
-      state: raw.state,
-      duration: raw.duration,
+      // Extract custom variables if they exist
+      plan_type: variables.plan_type,
+      member_count: variables.member_count,
+      zip: variables.zip || raw.variables?.zip,
+      state: variables.state || raw.variables?.state,
+      duration: raw.call_length || raw.corrected_duration,
+      // Additional useful fields from Bland
+      summary: raw.summary,
+      answered_by: raw.answered_by,
+      call_ended_by: raw.call_ended_by,
+      completed: raw.completed,
+      status: raw.status,
     };
   }
 
   /**
-   * Map Bland outcome to standardized CallOutcome enum
+   * Determine call outcome from Bland API response
+   * Based on status, answered_by, and other indicators
    */
-  private mapOutcome(blandOutcome: string): CallOutcome {
-    // TODO: Adjust mappings based on actual Bland outcome values
-    const outcomeMap: { [key: string]: CallOutcome } = {
-      transferred: CallOutcome.TRANSFERRED,
-      transfer: CallOutcome.TRANSFERRED,
-      voicemail: CallOutcome.VOICEMAIL,
-      callback: CallOutcome.CALLBACK,
-      no_answer: CallOutcome.NO_ANSWER,
-      busy: CallOutcome.BUSY,
-      failed: CallOutcome.FAILED,
-    };
+  private determineOutcome(raw: any): CallOutcome {
+    // If there was a warm transfer, it was transferred
+    if (raw.warm_transfer_call && raw.warm_transfer_call.state === "MERGED") {
+      return CallOutcome.TRANSFERRED;
+    }
 
-    const normalized = blandOutcome?.toLowerCase();
-    return outcomeMap[normalized] || CallOutcome.UNKNOWN;
+    // Check answered_by field
+    const answeredBy = raw.answered_by?.toLowerCase();
+    if (answeredBy === "voicemail") {
+      return CallOutcome.VOICEMAIL;
+    }
+    if (answeredBy === "no-answer" || answeredBy === "no_answer") {
+      return CallOutcome.NO_ANSWER;
+    }
+    if (answeredBy === "busy") {
+      return CallOutcome.BUSY;
+    }
+
+    // Check if call completed successfully with human
+    if (raw.completed && answeredBy === "human") {
+      // Check if there's a callback request in variables
+      if (raw.variables?.callback_requested === true) {
+        return CallOutcome.CALLBACK;
+      }
+      // Default to transferred if completed with human
+      return CallOutcome.TRANSFERRED;
+    }
+
+    // Check error status
+    if (raw.error_message || raw.status === "failed") {
+      return CallOutcome.FAILED;
+    }
+
+    // Default unknown
+    return CallOutcome.UNKNOWN;
   }
 
   /**

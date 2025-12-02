@@ -19,7 +19,7 @@ const router = Router();
  * ASYNC: Returns immediately, processes in background
  */
 router.post("/awhealth-outbound", async (req: Request, res: Response) => {
-  const requestId = `req_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+  const requestId = `req_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`;
 
   logger.info("📥 Received AWH webhook", {
     request_id: requestId,

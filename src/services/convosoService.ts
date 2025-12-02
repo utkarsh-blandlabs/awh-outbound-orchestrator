@@ -69,6 +69,12 @@ class ConvosoService {
         }
       );
 
+      // Log full Convoso lead insert response
+      logger.debug("📋 Convoso API - Lead Insert Response", {
+        full_response: response,
+        lead_id: response.lead_id,
+      });
+
       const lead: ConvosoLead = {
         lead_id: response.lead_id || payload.lead_id,
         first_name: payload.first_name,
@@ -123,18 +129,26 @@ class ConvosoService {
     };
 
     try {
-      await retry(
+      const response = await retry(
         async () => {
           // Real Convoso API call
-          await this.client.post("/v1/log/update", null, {
+          const result = await this.client.post("/v1/log/update", null, {
             params: requestData,
           });
+          return result.data;
         },
         {
           maxAttempts: config.retry.maxAttempts,
           shouldRetry: isRetryableHttpError,
         }
       );
+
+      // Log full Convoso call log update response
+      logger.debug("🔀 Convoso API - Call Log Update Response", {
+        full_response: response,
+        lead_id: leadId,
+        outcome: transcript.outcome,
+      });
 
       logger.info("Call log updated successfully", {
         lead_id: leadId,
@@ -156,7 +170,6 @@ class ConvosoService {
    */
   private formatTranscriptForConvoso(transcript: BlandTranscript): string {
     const parts: string[] = [];
-
     // Call outcome
     parts.push(`Call Outcome: ${transcript.outcome}`);
 

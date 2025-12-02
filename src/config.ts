@@ -2,6 +2,11 @@
 // Configuration Module
 // ============================================================================
 
+import dotenv from "dotenv";
+
+// Load environment variables from .env file
+dotenv.config();
+
 /**
  * Load and validate environment variables
  */
@@ -16,11 +21,29 @@ export const config = {
     baseUrl: process.env["BLAND_BASE_URL"] || "https://api.bland.ai",
     pathwayId: process.env["BLAND_PATHWAY_ID"] || "",
     startNodeId: process.env["BLAND_START_NODE_ID"] || "",
-    fromNumber: process.env["BLAND_FROM_NUMBER"] || "",
-    transferNumber: process.env["BLAND_TRANSFER_NUMBER"] || "",
-    voicemailMessage:
-      process.env["BLAND_VOICEMAIL_MESSAGE"] ||
-      "This is Ashley from American Way Health...",
+
+    // Phone numbers
+    from: process.env["BLAND_FROM"] || "",
+    transferPhoneNumber: process.env["BLAND_TRANSFER_PHONE_NUMBER"] || "",
+
+    // Voice and behavior settings
+    voiceId: process.env["BLAND_VOICE_ID"] || "",
+    maxDuration: parseInt(process.env["BLAND_MAX_DURATION"] || "30"),
+
+    // Call behavior
+    answeringMachineDetection: process.env["BLAND_ANSWERING_MACHINE_DETECTION"] === "true",
+    waitForGreeting: process.env["BLAND_WAIT_FOR_GREETING"] === "true",
+    blockInterruptions: process.env["BLAND_BLOCK_INTERRUPTIONS"] === "true",
+    record: process.env["BLAND_RECORD"] === "true",
+
+    // Voicemail settings
+    voicemailMessage: process.env["BLAND_VOICEMAIL_MESSAGE"] || "",
+    voicemailAction: process.env["BLAND_VOICEMAIL_ACTION"] || "leave_message",
+    sensitiveVoicemailDetection: process.env["BLAND_SENSITIVE_VOICEMAIL_DETECTION"] === "true",
+
+    // Dynamic templates
+    taskTemplate: process.env["BLAND_TASK_TEMPLATE"] || "",
+    firstSentenceTemplate: process.env["BLAND_FIRST_SENTENCE_TEMPLATE"] || "",
 
     // Polling config for transcript
     transcriptPollInterval: parseInt(
@@ -31,7 +54,7 @@ export const config = {
     ), // 5 minutes max
   },
 
-  // Convoso API config (Updated with actual auth method from Jeff)
+  // Convoso API config
   convoso: {
     authToken: process.env["CONVOSO_AUTH_TOKEN"] || "",
     baseUrl: process.env["CONVOSO_BASE_URL"] || "https://api.convoso.com",
