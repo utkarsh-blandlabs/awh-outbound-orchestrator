@@ -45,6 +45,7 @@ export interface BlandOutboundCallRequest {
   voice?: string;
   max_duration?: number;
   amd?: boolean; // Answering machine detection
+  answered_by_enabled?: boolean;
   wait_for_greeting?: boolean;
   block_interruptions?: boolean;
   record?: boolean;
@@ -57,6 +58,7 @@ export interface BlandOutboundCallRequest {
   // Voicemail settings
   voicemail_message?: string;
   voicemail_action?: "leave_message" | "hangup";
+  sensitive_voicemail_detection?: boolean;
 
   // Other options
   model?: "base" | "turbo";
@@ -106,6 +108,21 @@ export interface BlandTranscript {
   call_ended_by?: string;
   completed?: boolean;
   status?: string;
+  // Customer information from variables
+  customer_age?: number;
+  postal_code?: string;
+  customer_state?: string;
+  first_name?: string;
+  last_name?: string;
+  // Pathway information
+  pathway_tags?: string[];
+  // Transfer information
+  transferred_to?: string;
+  transferred_at?: string;
+  // Recording
+  recording_url?: string;
+  // Warm transfer details
+  warm_transfer_call?: any;
   [key: string]: any;
 }
 

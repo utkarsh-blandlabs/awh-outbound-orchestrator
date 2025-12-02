@@ -39,6 +39,7 @@ export const config = {
     // Voicemail settings
     voicemailMessage: process.env["BLAND_VOICEMAIL_MESSAGE"] || "",
     voicemailAction: process.env["BLAND_VOICEMAIL_ACTION"] || "leave_message",
+    answeredByEnabled: process.env["BLAND_ANSWERED_BY_ENABLED"] === "true",
     sensitiveVoicemailDetection: process.env["BLAND_SENSITIVE_VOICEMAIL_DETECTION"] === "true",
 
     // Dynamic templates

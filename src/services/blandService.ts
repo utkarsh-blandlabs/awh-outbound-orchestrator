@@ -42,7 +42,7 @@ class BlandService {
       name: `${payload.firstName} ${payload.lastName}`,
     });
 
-    // Build dynamic task and first sentence with customer's name
+    // Build dynamic task, first sentence, and voicemail message with customer's name
     const task = config.bland.taskTemplate
       ? config.bland.taskTemplate
           .replace(/\{\{first_name\}\}/g, payload.firstName)
@@ -54,6 +54,20 @@ class BlandService {
           .replace(/\{\{first_name\}\}/g, payload.firstName)
           .replace(/\{\{last_name\}\}/g, payload.lastName)
       : undefined;
+
+    // Personalize voicemail message with first name (like Zapier)
+    const voicemailMessage = config.bland.voicemailMessage
+      ? config.bland.voicemailMessage
+          .replace(/\{\{first_name\}\}/g, payload.firstName)
+          .replace(/\{\{last_name\}\}/g, payload.lastName)
+      : "";
+
+    // Log the personalized templates
+    logger.debug("🎭 Personalized Call Templates", {
+      task: task?.substring(0, 100) + "...",
+      first_sentence: firstSentence,
+      voicemail_message: voicemailMessage,
+    });
 
     // Build request body matching Zapier configuration
     const requestBody: BlandOutboundCallRequest = {
@@ -76,6 +90,7 @@ class BlandService {
       ...(config.bland.voiceId && { voice: config.bland.voiceId }),
       max_duration: config.bland.maxDuration,
       amd: config.bland.answeringMachineDetection,
+      answered_by_enabled: config.bland.answeredByEnabled,
       wait_for_greeting: config.bland.waitForGreeting,
       block_interruptions: config.bland.blockInterruptions,
       record: config.bland.record,
@@ -83,16 +98,16 @@ class BlandService {
       // First sentence
       ...(firstSentence && { first_sentence: firstSentence }),
 
-      // Voicemail settings
-      voicemail_message: config.bland.voicemailMessage,
+      // Voicemail settings (personalized with customer's first name)
+      voicemail_message: voicemailMessage,
       ...(config.bland.voicemailAction && {
         voicemail_action: config.bland.voicemailAction as
           | "leave_message"
           | "hangup",
       }),
+      sensitive_voicemail_detection: config.bland.sensitiveVoicemailDetection,
 
       // Additional settings
-      language: "eng",
       wait: false, // Don't wait for call to complete (async)
     };
 
@@ -166,9 +181,14 @@ class BlandService {
         );
 
         // Check if call is completed
-        if (response.completed === true && response.status === "completed") {
+        // Note: Bland sometimes returns status="completed" but completed=false while processing transcript
+        // We need to check if the transcript is actually available
+        const hasTranscript = response.concatenated_transcript && response.concatenated_transcript.length > 0;
+        const isCompleted = response.completed === true || (response.status === "completed" && hasTranscript);
+
+        if (isCompleted) {
           // Log full raw response from Bland
-          logger.debug("📝 Bland API - Full Transcript Response (RAW)", {
+          logger.info("📝 Bland API - Full Transcript Response (RAW)", {
             full_response: response,
           });
 
@@ -184,11 +204,12 @@ class BlandService {
         }
 
         // Call not completed yet, wait and retry
-        logger.debug("Call not completed yet, polling again", {
+        logger.info("Call not completed yet, polling again", {
           attempt,
           maxAttempts,
           status: response.status,
           completed: response.completed,
+          has_transcript: hasTranscript,
         });
 
         await this.sleep(pollInterval);
@@ -221,7 +242,7 @@ class BlandService {
    */
   private parseTranscript(raw: any): BlandTranscript {
     // Log raw response for debugging
-    logger.debug("Raw Bland transcript response", {
+    logger.info("Raw Bland transcript response", {
       call_id: raw.call_id,
       status: raw.status,
       completed: raw.completed,
@@ -244,8 +265,8 @@ class BlandService {
       // Extract custom variables if they exist
       plan_type: variables.plan_type,
       member_count: variables.member_count,
-      zip: variables.zip || raw.variables?.zip,
-      state: variables.state || raw.variables?.state,
+      zip: variables.zip || raw.variables?.zip || variables.postal_code,
+      state: variables.state || raw.variables?.state || variables.customer_state,
       duration: raw.call_length || raw.corrected_duration,
       // Additional useful fields from Bland
       summary: raw.summary,
@@ -253,6 +274,21 @@ class BlandService {
       call_ended_by: raw.call_ended_by,
       completed: raw.completed,
       status: raw.status,
+      // Customer information from variables
+      customer_age: variables.customer_age,
+      postal_code: variables.postal_code,
+      customer_state: variables.customer_state,
+      first_name: variables.first_name,
+      last_name: variables.last_name,
+      // Pathway information
+      pathway_tags: raw.pathway_tags || [],
+      // Transfer information
+      transferred_to: raw.transferred_to,
+      transferred_at: raw.transferred_at,
+      // Recording
+      recording_url: raw.recording_url,
+      // Warm transfer details
+      warm_transfer_call: raw.warm_transfer_call,
     };
   }
 
