@@ -183,12 +183,16 @@ class BlandService {
         // Check if call is completed
         // Note: Bland sometimes returns status="completed" but completed=false while processing transcript
         // We need to check if the transcript is actually available
-        const hasTranscript = response.concatenated_transcript && response.concatenated_transcript.length > 0;
-        const isCompleted = response.completed === true || (response.status === "completed" && hasTranscript);
+        const hasTranscript =
+          response.concatenated_transcript &&
+          response.concatenated_transcript.length > 0;
+        const isCompleted =
+          response.completed === true ||
+          (response.status === "completed" && hasTranscript);
 
         if (isCompleted) {
           // Log full raw response from Bland
-          logger.info("📝 Bland API - Full Transcript Response (RAW)", {
+          logger.debug("📝 Bland API - Full Transcript Response (RAW)", {
             full_response: response,
           });
 
@@ -266,7 +270,8 @@ class BlandService {
       plan_type: variables.plan_type,
       member_count: variables.member_count,
       zip: variables.zip || raw.variables?.zip || variables.postal_code,
-      state: variables.state || raw.variables?.state || variables.customer_state,
+      state:
+        variables.state || raw.variables?.state || variables.customer_state,
       duration: raw.call_length || raw.corrected_duration,
       // Additional useful fields from Bland
       summary: raw.summary,
