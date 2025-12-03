@@ -18,11 +18,12 @@ const app = express();
 // Middleware
 // ============================================================================
 
-// Parse JSON bodies
-app.use(express.json());
+// Parse JSON bodies with increased size limit for Bland webhooks
+// Bland sends large payloads with full transcripts, recordings, etc.
+app.use(express.json({ limit: "10mb" }));
 
 // Parse URL-encoded bodies
-app.use(express.urlencoded({ extended: true }));
+app.use(express.urlencoded({ extended: true, limit: "10mb" }));
 
 // Request logging middleware
 app.use((req: Request, res: Response, next: NextFunction) => {
