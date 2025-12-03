@@ -5,24 +5,26 @@
 
 import { logger } from "../utils/logger";
 import { blandService } from "../services/blandService";
-import { convosoService } from "../services/convosoService";
+import { CallStateManager } from "../services/callStateManager";
 import {
   ConvosoWebhookPayload,
   OrchestrationResult,
   CallOutcome,
   BlandOutboundCallResponse,
-  BlandTranscript,
 } from "../types/awh";
 
 /**
  * Orchestration stages for tracking progress
- * Matches Zapier flow: Webhook → Bland Call → Transcript → Update Convoso
+ * With webhook-based approach:
+ * 1. Convoso Webhook → Start orchestration
+ * 2. Bland Call → Initiate call with webhook URL
+ * 3. (Wait for Bland webhook callback) → Handled by blandWebhook route
+ * 4. Convoso Update → Update call log when webhook received
  */
 enum OrchestrationStage {
   INIT = "INIT",
   BLAND_CALL = "BLAND_CALL",
-  BLAND_TRANSCRIPT = "BLAND_TRANSCRIPT",
-  CONVOSO_UPDATE = "CONVOSO_UPDATE",
+  WEBHOOK_REGISTERED = "WEBHOOK_REGISTERED",
   COMPLETE = "COMPLETE",
 }
 
@@ -55,7 +57,7 @@ export async function handleAwhOutbound(
   });
 
   try {
-    // Stage 1: Trigger Bland outbound call (directly, no Convoso lead insert)
+    // Stage 1: Trigger Bland outbound call with webhook URL
     const callResult = await executeStage(
       OrchestrationStage.BLAND_CALL,
       () => triggerOutboundCall(payload),
@@ -69,55 +71,40 @@ export async function handleAwhOutbound(
     currentStage = OrchestrationStage.BLAND_CALL;
     const callResponse = callResult.data;
 
-    // Stage 2: Poll Bland for transcript
-    const transcriptResult = await executeStage(
-      OrchestrationStage.BLAND_TRANSCRIPT,
-      () => getTranscript(callResponse.call_id),
-      requestId
+    // Stage 2: Register call state for webhook tracking
+    CallStateManager.addPendingCall(
+      callResponse.call_id,
+      requestId || "",
+      payload.lead_id,
+      payload.phone_number,
+      payload.first_name,
+      payload.last_name
     );
-    if (!transcriptResult.success || !transcriptResult.data) {
-      throw new Error(
-        `Stage ${OrchestrationStage.BLAND_TRANSCRIPT} failed: ${transcriptResult.error}`
-      );
-    }
-    currentStage = OrchestrationStage.BLAND_TRANSCRIPT;
-    const transcript = transcriptResult.data;
+    currentStage = OrchestrationStage.WEBHOOK_REGISTERED;
 
-    // Stage 3: Update Convoso call log with transcript and outcome
-    const updateResult = await executeStage(
-      OrchestrationStage.CONVOSO_UPDATE,
-      () =>
-        convosoService.updateCallLog(
-          payload.lead_id,
-          payload.phone_number,
-          transcript
-        ),
-      requestId
-    );
-    if (!updateResult.success) {
-      logger.warn("⚠️ Convoso call log update failed, but call completed", {
-        error: updateResult.error,
-      });
-    }
-    currentStage = OrchestrationStage.CONVOSO_UPDATE;
-
-    // Success!
-    const duration = Date.now() - startTime;
-    logger.info("✅ AWH orchestration completed successfully", {
+    logger.info("✅ Call initiated successfully, waiting for Bland webhook", {
       request_id: requestId,
       lead_id: payload.lead_id,
       call_id: callResponse.call_id,
-      outcome: transcript.outcome,
+      note: "Bland will POST to webhook when call completes",
+    });
+
+    // Success! (Call initiated, webhook will handle completion)
+    const duration = Date.now() - startTime;
+    logger.info("✅ AWH orchestration initiated successfully", {
+      request_id: requestId,
+      lead_id: payload.lead_id,
+      call_id: callResponse.call_id,
       duration_ms: duration,
       stages_completed: currentStage,
+      next_step: "Waiting for Bland webhook callback",
     });
 
     return {
       success: true,
       lead_id: payload.lead_id,
       call_id: callResponse.call_id,
-      outcome: transcript.outcome,
-      transcript,
+      outcome: CallOutcome.UNKNOWN, // Will be updated when webhook arrives
     };
   } catch (error: any) {
     const duration = Date.now() - startTime;
@@ -199,15 +186,15 @@ function getStageEmoji(stage: OrchestrationStage): string {
   const emojiMap: Record<OrchestrationStage, string> = {
     [OrchestrationStage.INIT]: "🚀",
     [OrchestrationStage.BLAND_CALL]: "📞",
-    [OrchestrationStage.BLAND_TRANSCRIPT]: "⏳",
-    [OrchestrationStage.CONVOSO_UPDATE]: "🔀",
+    [OrchestrationStage.WEBHOOK_REGISTERED]: "🔔",
     [OrchestrationStage.COMPLETE]: "✅",
   };
   return emojiMap[stage] || "•";
 }
 
 /**
- * Stage 1: Trigger Bland outbound call
+ * Stage 1: Trigger Bland outbound call with webhook URL
+ * Bland will automatically POST to our webhook when the call completes
  */
 async function triggerOutboundCall(
   payload: ConvosoWebhookPayload
@@ -217,13 +204,6 @@ async function triggerOutboundCall(
     firstName: payload.first_name,
     lastName: payload.last_name,
   });
-}
-
-/**
- * Stage 2: Get transcript from Bland
- */
-async function getTranscript(callId: string): Promise<BlandTranscript> {
-  return await blandService.getTranscript(callId);
 }
 
 /**

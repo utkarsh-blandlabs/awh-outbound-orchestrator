@@ -6,6 +6,7 @@ import express, { Request, Response, NextFunction } from "express";
 import { config, validateConfig, printConfig } from "./config";
 import { logger } from "./utils/logger";
 import awhWebhookRouter from "./routes/awhWebhook";
+import blandWebhookRouter from "./routes/blandWebhook";
 
 // Validate environment variables
 validateConfig();
@@ -56,6 +57,7 @@ app.get("/health", (req: Request, res: Response) => {
 
 // Webhook routes
 app.use("/webhooks", awhWebhookRouter);
+app.use("/webhooks", blandWebhookRouter);
 
 // 404 handler
 app.use((req: Request, res: Response) => {
@@ -100,12 +102,14 @@ const server = app.listen(PORT, () => {
   console.log("");
   console.log("📡 Available endpoints:");
   console.log(`   GET  http://localhost:${PORT}/health`);
-  console.log(`   POST http://localhost:${PORT}/webhooks/awhealth-outbound`);
+  console.log(`   POST http://localhost:${PORT}/webhooks/awhealth-outbound (from Convoso)`);
+  console.log(`   POST http://localhost:${PORT}/webhooks/bland-callback (from Bland AI)`);
   console.log("");
-  console.log("⚡ Architecture: ASYNC (background processing)");
-  console.log("   - Webhooks return immediately (< 1s)");
-  console.log("   - Call processing happens in background");
-  console.log("   - Results updated to Convoso when ready");
+  console.log("⚡ Architecture: WEBHOOK-BASED (no polling!)");
+  console.log("   - Convoso webhook triggers call initiation");
+  console.log("   - Bland webhook notifies when call completes");
+  console.log("   - Results updated to Convoso automatically");
+  console.log("   - Scalable to 100+ concurrent calls");
   console.log("");
   console.log("✅ Ready to receive webhooks!");
   console.log("");

@@ -46,7 +46,10 @@ export const config = {
     taskTemplate: process.env["BLAND_TASK_TEMPLATE"] || "",
     firstSentenceTemplate: process.env["BLAND_FIRST_SENTENCE_TEMPLATE"] || "",
 
-    // Polling config for transcript
+    // Webhook configuration
+    webhookUrl: process.env["BLAND_WEBHOOK_URL"] || "",
+
+    // Polling config for transcript (DEPRECATED - only used as fallback)
     transcriptPollInterval: parseInt(
       process.env["BLAND_POLL_INTERVAL"] || "5000"
     ), // 5 seconds

@@ -107,6 +107,9 @@ class BlandService {
       }),
       sensitive_voicemail_detection: config.bland.sensitiveVoicemailDetection,
 
+      // Webhook URL - Bland will POST to this URL when call completes
+      ...(config.bland.webhookUrl && { webhook: config.bland.webhookUrl }),
+
       // Additional settings
       wait: false, // Don't wait for call to complete (async)
     };
@@ -159,6 +162,10 @@ class BlandService {
    * Get transcript and outcome from Bland
    * Real Bland API: GET /v1/calls/{call_id}
    * Polls until call is completed
+   *
+   * @deprecated This method is DEPRECATED and only kept as a fallback.
+   * Use webhook-based completion instead (POST /webhooks/bland-callback).
+   * Polling is inefficient and doesn't scale well with concurrent calls.
    */
   async getTranscript(callId: string): Promise<BlandTranscript> {
     logger.info("Fetching transcript from Bland", { call_id: callId });

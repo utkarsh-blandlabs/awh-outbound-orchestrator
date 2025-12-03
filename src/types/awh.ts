@@ -60,6 +60,9 @@ export interface BlandOutboundCallRequest {
   voicemail_action?: "leave_message" | "hangup";
   sensitive_voicemail_detection?: boolean;
 
+  // Webhook URL - Bland will POST to this URL when call completes
+  webhook?: string;
+
   // Other options
   model?: "base" | "turbo";
   reduce_latency?: boolean;
