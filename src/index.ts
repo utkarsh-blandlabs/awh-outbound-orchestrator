@@ -7,6 +7,7 @@ import { config, validateConfig, printConfig } from "./config";
 import { logger } from "./utils/logger";
 import awhWebhookRouter from "./routes/awhWebhook";
 import blandWebhookRouter from "./routes/blandWebhook";
+import adminRouter from "./routes/adminRoutes";
 
 // Validate environment variables
 validateConfig();
@@ -60,6 +61,9 @@ app.get("/health", (req: Request, res: Response) => {
 app.use("/webhooks", awhWebhookRouter);
 app.use("/webhooks", blandWebhookRouter);
 
+// Admin API routes (for Retool dashboard)
+app.use("/api/admin", adminRouter);
+
 // 404 handler
 app.use((req: Request, res: Response) => {
   res.status(404).json({
@@ -105,6 +109,13 @@ const server = app.listen(PORT, () => {
   console.log(`   GET  http://localhost:${PORT}/health`);
   console.log(`   POST http://localhost:${PORT}/webhooks/awhealth-outbound (from Convoso)`);
   console.log(`   POST http://localhost:${PORT}/webhooks/bland-callback (from Bland AI)`);
+  console.log("");
+  console.log("🔧 Admin API endpoints:");
+  console.log(`   GET  http://localhost:${PORT}/api/admin/calls/active`);
+  console.log(`   GET  http://localhost:${PORT}/api/admin/calls/stats`);
+  console.log(`   GET  http://localhost:${PORT}/api/admin/calls/:call_id`);
+  console.log(`   GET  http://localhost:${PORT}/api/admin/health`);
+  console.log(`   POST http://localhost:${PORT}/api/admin/cache/clear`);
   console.log("");
   console.log("⚡ Architecture: WEBHOOK-BASED (no polling!)");
   console.log("   - Convoso webhook triggers call initiation");
