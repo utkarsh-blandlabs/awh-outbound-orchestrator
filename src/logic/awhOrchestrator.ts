@@ -4,6 +4,7 @@
 // ============================================================================
 
 import { logger } from "../utils/logger";
+import { errorLogger } from "../utils/errorLogger";
 import { blandService } from "../services/blandService";
 import { CallStateManager } from "../services/callStateManager";
 import {
@@ -117,6 +118,20 @@ export async function handleAwhOutbound(
       duration_ms: duration,
       phone: payload.phone_number,
     });
+
+    // Log error to separate error log
+    errorLogger.logError(
+      requestId || "unknown",
+      "STAGE_FAILED",
+      error.message,
+      {
+        stage: currentStage,
+        phoneNumber: payload.phone_number,
+        leadId: payload.lead_id,
+        stackTrace: error.stack,
+        durationMs: duration,
+      }
+    );
 
     return {
       success: false,
