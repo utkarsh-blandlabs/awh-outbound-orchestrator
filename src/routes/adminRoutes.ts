@@ -5,6 +5,7 @@
 
 import { Router, Request, Response } from "express";
 import { CallStateManager } from "../services/callStateManager";
+import { blandRateLimiter } from "../utils/rateLimiter";
 import { logger } from "../utils/logger";
 
 const router = Router();
@@ -254,6 +255,7 @@ router.get("/health", (req: Request, res: Response) => {
     const stats = CallStateManager.getStats();
     const memoryUsage = process.memoryUsage();
     const uptime = process.uptime();
+    const rateLimitStats = blandRateLimiter.getStats();
 
     res.json({
       success: true,
@@ -271,6 +273,12 @@ router.get("/health", (req: Request, res: Response) => {
         ),
       },
       calls: stats,
+      rate_limit: {
+        current_rate: `${rateLimitStats.currentCallsPerSecond}/${rateLimitStats.maxCallsPerSecond} calls/sec`,
+        utilization: `${rateLimitStats.utilizationPercent}%`,
+        unique_numbers: rateLimitStats.uniqueNumbersCalled,
+        config: blandRateLimiter.getConfig(),
+      },
       node_version: process.version,
       platform: process.platform,
     });

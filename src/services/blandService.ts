@@ -7,6 +7,7 @@ import axios, { AxiosInstance } from "axios";
 import { config } from "../config";
 import { logger } from "../utils/logger";
 import { retry, isRetryableHttpError } from "../utils/retry";
+import { blandRateLimiter } from "../utils/rateLimiter";
 import {
   BlandOutboundCallRequest,
   BlandOutboundCallResponse,
@@ -37,6 +38,19 @@ class BlandService {
     firstName: string;
     lastName: string;
   }): Promise<BlandOutboundCallResponse> {
+    // Wait for rate limit slot before proceeding
+    // This enforces:
+    // 1. Global limit: Max 5 calls/sec (Enterprise: 5.5/sec)
+    // 2. Per-number limit: Min 10 seconds between calls to same number
+    const waitTime = blandRateLimiter.getWaitTime(payload.phoneNumber);
+    if (waitTime > 0) {
+      logger.info("Rate limit: waiting before call", {
+        phone: payload.phoneNumber,
+        waitTimeMs: waitTime,
+      });
+    }
+    await blandRateLimiter.waitForSlot(payload.phoneNumber);
+
     logger.info("Sending outbound call to Bland", {
       phone: payload.phoneNumber,
       name: `${payload.firstName} ${payload.lastName}`,

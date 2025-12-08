@@ -1,0 +1,142 @@
+name: Deploy to EC2
+
+on:
+  push:
+    branches:
+      - main              # Deploy when pushing to main branch
+      - async-orchestrator # Also deploy from your current branch
+  workflow_dispatch:      # Allow manual trigger from GitHub UI
+
+jobs:
+  deploy:
+    name: Deploy to AWS EC2
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build TypeScript
+        run: npm run build
+
+      - name: Create deployment package
+        run: |
+          tar -czf awh-orchestrator-deploy.tar.gz \
+            --exclude='node_modules' \
+            --exclude='.env' \
+            --exclude='*.log' \
+            --exclude='.git' \
+            --exclude='.github' \
+            --exclude='*.tar.gz' \
+            --exclude='test' \
+            --exclude='docs' \
+            .
+
+      - name: Deploy to EC2
+        env:
+          EC2_SSH_KEY: ${{ secrets.EC2_SSH_PRIVATE_KEY }}
+          EC2_HOST: ${{ secrets.EC2_HOST }}
+          EC2_USER: ${{ secrets.EC2_USER }}
+        run: |
+          # Save SSH key to file
+          echo "$EC2_SSH_KEY" > private_key.pem
+          chmod 600 private_key.pem
+
+          # Copy deployment package to EC2
+          scp -i private_key.pem \
+            -o StrictHostKeyChecking=no \
+            awh-orchestrator-deploy.tar.gz \
+            ${EC2_USER}@${EC2_HOST}:/tmp/
+
+          # Deploy on EC2
+          ssh -i private_key.pem \
+            -o StrictHostKeyChecking=no \
+            ${EC2_USER}@${EC2_HOST} << 'ENDSSH'
+            set -e
+
+            APP_DIR="/var/www/awh-orchestrator"
+            PACKAGE="/tmp/awh-orchestrator-deploy.tar.gz"
+
+            echo "📦 Deploying to $APP_DIR..."
+
+            # Create backup of current version
+            if [ -d "$APP_DIR" ]; then
+              BACKUP_DIR="$APP_DIR-backup-$(date +%Y%m%d-%H%M%S)"
+              echo "🔄 Creating backup: $BACKUP_DIR"
+              cp -r "$APP_DIR" "$BACKUP_DIR"
+
+              # Preserve .env file
+              if [ -f "$APP_DIR/.env" ]; then
+                cp "$APP_DIR/.env" /tmp/.env.backup
+                echo "✓ Preserved .env file"
+              fi
+            fi
+
+            # Create directory if doesn't exist
+            mkdir -p "$APP_DIR"
+            cd "$APP_DIR"
+
+            # Extract new version
+            echo "📂 Extracting package..."
+            tar -xzf "$PACKAGE"
+
+            # Restore .env
+            if [ -f "/tmp/.env.backup" ]; then
+              cp /tmp/.env.backup .env
+              rm /tmp/.env.backup
+              echo "✓ Restored .env file"
+            fi
+
+            # Install production dependencies
+            echo "📥 Installing dependencies..."
+            npm install --production
+
+            # Create logs directory
+            mkdir -p logs
+
+            # Restart PM2
+            if pm2 list | grep -q "awh-orchestrator"; then
+              echo "🔄 Restarting PM2..."
+              pm2 restart awh-orchestrator
+            else
+              echo "🚀 Starting with PM2..."
+              pm2 start ecosystem.config.js
+              pm2 save
+            fi
+
+            # Show status
+            echo ""
+            echo "✅ Deployment complete!"
+            pm2 status
+
+            # Cleanup
+            rm -f "$PACKAGE"
+          ENDSSH
+
+          # Cleanup local SSH key
+          rm -f private_key.pem
+
+          echo "✅ Deployment to EC2 completed successfully!"
+
+      - name: Verify Deployment
+        env:
+          EC2_HOST: ${{ secrets.EC2_HOST }}
+        run: |
+          echo "Waiting 5 seconds for app to start..."
+          sleep 5
+
+          # Test health endpoint
+          if curl -sf --max-time 10 "http://${EC2_HOST}:3000/health"; then
+            echo "✅ Health check passed!"
+          else
+            echo "⚠️ Warning: Health check failed (app may still be starting)"
+          fi
