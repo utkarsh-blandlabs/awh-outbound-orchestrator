@@ -30,6 +30,7 @@ jobs:
 
       - name: Create deployment package
         run: |
+          # Create a clean list of files to include
           tar -czf awh-orchestrator-deploy.tar.gz \
             --exclude='node_modules' \
             --exclude='.env' \
@@ -39,7 +40,8 @@ jobs:
             --exclude='*.tar.gz' \
             --exclude='test' \
             --exclude='docs' \
-            .
+            --warning=no-file-changed \
+            . || ([ $? -eq 1 ] && exit 0 || exit $?)
 
       - name: Deploy to EC2
         env:
