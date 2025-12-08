@@ -3,9 +3,8 @@ name: Deploy to EC2
 on:
   push:
     branches:
-      - main              # Deploy when pushing to main branch
       - async-orchestrator # Also deploy from your current branch
-  workflow_dispatch:      # Allow manual trigger from GitHub UI
+  workflow_dispatch: # Allow manual trigger from GitHub UI
 
 jobs:
   deploy:
@@ -19,8 +18,8 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: '20'
-          cache: 'npm'
+          node-version: "20"
+          cache: "npm"
 
       - name: Install dependencies
         run: npm ci
@@ -45,7 +44,7 @@ jobs:
 
       - name: Deploy to EC2
         env:
-          EC2_SSH_KEY: ${{ secrets.EC2_SSH_PRIVATE_KEY }}
+          EC2_SSH_KEY: ${{ secrets.EC2_SSH_AWH_PRIVATE_KEY }}
           EC2_HOST: ${{ secrets.EC2_HOST }}
           EC2_USER: ${{ secrets.EC2_USER }}
         run: |
@@ -63,7 +62,7 @@ jobs:
           # Verify key format
           if ! ssh-keygen -l -f private_key.pem 2>/dev/null; then
             echo "Error: Invalid SSH key format"
-            echo "Please check that EC2_SSH_PRIVATE_KEY secret is set correctly"
+            echo "Please check that EC2_SSH_AWH_PRIVATE_KEY secret is set correctly"
             exit 1
           fi
 
