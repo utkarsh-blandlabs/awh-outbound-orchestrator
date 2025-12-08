@@ -233,6 +233,89 @@ class ConvosoService {
   ): Promise<void> {
     return this.updateCallLog(leadId, phoneNumber, transcript);
   }
+
+  /**
+   * Get call logs from Convoso
+   * Query call logs for a specific customer (Zapier Step 3)
+   *
+   * @param options Query options
+   * @returns Array of call logs
+   */
+  async getCallLogs(options: {
+    queueId: string;
+    phoneNumber: string;
+    firstName?: string;
+    lastName?: string;
+    startTime?: string;
+    endTime?: string;
+    limit?: number;
+    offset?: number;
+    includeRecordings?: boolean;
+  }): Promise<any[]> {
+    logger.info("Querying Convoso call logs", {
+      queueId: options.queueId,
+      phone: options.phoneNumber,
+    });
+
+    const params: any = {
+      auth_token: config.convoso.authToken,
+      queue_id: options.queueId,
+      phone_number: options.phoneNumber,
+    };
+
+    if (options.firstName) params.first_name = options.firstName;
+    if (options.lastName) params.last_name = options.lastName;
+    if (options.startTime) params.start_time = options.startTime;
+    if (options.endTime) params.end_time = options.endTime;
+    if (options.limit) params.limit = options.limit;
+    if (options.offset) params.offset = options.offset;
+    if (options.includeRecordings !== undefined) {
+      params.include_recordings = options.includeRecordings;
+    }
+
+    try {
+      const response = await retry(
+        async () => {
+          // Convoso call logs endpoint
+          const result = await this.client.get("/v1/calls/logs", {
+            params,
+          });
+          return result.data;
+        },
+        {
+          maxAttempts: config.retry.maxAttempts,
+          shouldRetry: isRetryableHttpError,
+        }
+      );
+
+      logger.info("Call logs retrieved successfully", {
+        queueId: options.queueId,
+        count: response.logs?.length || 0,
+      });
+
+      return response.logs || [];
+    } catch (error: any) {
+      logger.error("Failed to retrieve call logs from Convoso", {
+        error: error.message,
+        response: error.response?.data,
+        queueId: options.queueId,
+      });
+      throw new Error(`Convoso call logs error: ${error.message}`);
+    }
+  }
 }
 
 export const convosoService = new ConvosoService();
+
+/**
+ * Helper function for callback webhook
+ */
+export async function getConvosoCallLogs(options: {
+  queueId: string;
+  phoneNumber: string;
+  firstName?: string;
+  lastName?: string;
+  includeRecordings?: boolean;
+}): Promise<any[]> {
+  return convosoService.getCallLogs(options);
+}

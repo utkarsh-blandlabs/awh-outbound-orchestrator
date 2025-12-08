@@ -7,6 +7,7 @@ import { config, validateConfig, printConfig } from "./config";
 import { logger } from "./utils/logger";
 import awhWebhookRouter from "./routes/awhWebhook";
 import blandWebhookRouter from "./routes/blandWebhook";
+import callbackWebhookRouter from "./routes/callbackWebhook";
 import adminRouter from "./routes/adminRoutes";
 
 // Validate environment variables
@@ -60,6 +61,7 @@ app.get("/health", (req: Request, res: Response) => {
 // Webhook routes
 app.use("/webhooks", awhWebhookRouter);
 app.use("/webhooks", blandWebhookRouter);
+app.use("/webhooks", callbackWebhookRouter);
 
 // Admin API routes (for Retool dashboard)
 app.use("/api/admin", adminRouter);
@@ -109,6 +111,7 @@ const server = app.listen(PORT, () => {
   console.log(`   GET  http://localhost:${PORT}/health`);
   console.log(`   POST http://localhost:${PORT}/webhooks/awhealth-outbound (from Convoso)`);
   console.log(`   POST http://localhost:${PORT}/webhooks/bland-callback (from Bland AI)`);
+  console.log(`   POST http://localhost:${PORT}/webhooks/call-back (Zapier replacement)`);
   console.log("");
   console.log("🔧 Admin API endpoints:");
   console.log(`   GET  http://localhost:${PORT}/api/admin/calls/active`);
