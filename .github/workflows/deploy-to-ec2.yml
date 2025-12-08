@@ -87,8 +87,9 @@ jobs:
 
             # Create backup of current version
             if [ -d "$APP_DIR" ]; then
-              BACKUP_DIR="$APP_DIR-backup-$(date +%Y%m%d-%H%M%S)"
+              BACKUP_DIR="$HOME/backups/awh-orchestrator-$(date +%Y%m%d-%H%M%S)"
               echo "🔄 Creating backup: $BACKUP_DIR"
+              mkdir -p "$HOME/backups"
               cp -r "$APP_DIR" "$BACKUP_DIR"
 
               # Preserve .env file
