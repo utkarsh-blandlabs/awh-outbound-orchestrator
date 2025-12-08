@@ -49,15 +49,25 @@ jobs:
           EC2_HOST: ${{ secrets.EC2_HOST }}
           EC2_USER: ${{ secrets.EC2_USER }}
         run: |
-          # Save SSH key to file (preserve newlines)
-          echo "$EC2_SSH_KEY" | tr -d '\r' > private_key.pem
+          # Save SSH key to file and decode if base64
+          if echo "$EC2_SSH_KEY" | grep -q "BEGIN OPENSSH PRIVATE KEY"; then
+            # Key is in plain text format
+            echo "$EC2_SSH_KEY" > private_key.pem
+          else
+            # Key is base64 encoded
+            echo "$EC2_SSH_KEY" | base64 -d > private_key.pem
+          fi
+
           chmod 600 private_key.pem
 
           # Verify key format
-          if ! ssh-keygen -l -f private_key.pem; then
+          if ! ssh-keygen -l -f private_key.pem 2>/dev/null; then
             echo "Error: Invalid SSH key format"
+            echo "Please check that EC2_SSH_PRIVATE_KEY secret is set correctly"
             exit 1
           fi
+
+          echo "✓ SSH key validated successfully"
 
           # Copy deployment package to EC2
           scp -i private_key.pem \
