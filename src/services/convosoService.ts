@@ -154,11 +154,13 @@ class ConvosoService {
     // Map Bland outcome to Convoso status
     const convosoStatus = this.mapOutcomeToConvosoStatus(transcript.outcome);
 
-    logger.info("Updating Convoso call log", {
+    logger.info("📤 STEP 4 | Updating Convoso call log", {
       lead_id: leadId,
-      phone_number: phoneNumber,
+      phone: phoneNumber,
+      call_id: transcript.call_id,
       bland_outcome: transcript.outcome,
       convoso_status: convosoStatus,
+      duration: transcript.duration,
     });
 
     // Format transcript for Convoso
@@ -169,7 +171,7 @@ class ConvosoService {
       phone_number: phoneNumber,
       lead_id: leadId,
       call_transcript: callTranscript,
-      status: convosoStatus, // Add status to the update
+      status: convosoStatus, // IMPORTANT: Only abbreviation, not description
     };
 
     try {

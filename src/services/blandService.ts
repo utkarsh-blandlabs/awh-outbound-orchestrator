@@ -56,30 +56,32 @@ class BlandService {
       name: `${payload.firstName} ${payload.lastName}`,
     });
 
-    // Build dynamic task, first sentence, and voicemail message with customer's name
-    const task = config.bland.taskTemplate
-      ? config.bland.taskTemplate
-          .replace(/\{\{first_name\}\}/g, payload.firstName)
-          .replace(/\{\{last_name\}\}/g, payload.lastName)
-      : undefined;
+    // IMPORTANT: Build request_data (parameters) for Bland pathway to access
+    // This is how the AI can retrieve customer information during the call
+    // The pathway accesses these via {{first_name}} and {{last_name}} syntax
+    const requestData: Record<string, any> = {
+      first_name: payload.firstName,
+      last_name: payload.lastName,
+    };
 
-    const firstSentence = config.bland.firstSentenceTemplate
-      ? config.bland.firstSentenceTemplate
-          .replace(/\{\{first_name\}\}/g, payload.firstName)
-          .replace(/\{\{last_name\}\}/g, payload.lastName)
-      : undefined;
+    // Get templates from config (WITHOUT replacing placeholders)
+    // Bland.ai will replace {{first_name}} and {{last_name}} at runtime
+    const task = config.bland.taskTemplate || undefined;
+    const firstSentence = config.bland.firstSentenceTemplate || undefined;
 
-    // Personalize voicemail message with first name (like Zapier)
+    // For voicemail, we still replace placeholders because Bland doesn't
+    // have access to request_data in voicemail context
     const voicemailMessage = config.bland.voicemailMessage
       ? config.bland.voicemailMessage
           .replace(/\{\{first_name\}\}/g, payload.firstName)
           .replace(/\{\{last_name\}\}/g, payload.lastName)
       : "";
 
-    // Log the personalized templates
-    logger.debug("🎭 Personalized Call Templates", {
-      task: task?.substring(0, 100) + "...",
-      first_sentence: firstSentence,
+    // Log what we're sending
+    logger.debug("🎭 Call Configuration", {
+      request_data: requestData,
+      task_template: task?.substring(0, 100) + "...",
+      first_sentence_template: firstSentence,
       voicemail_message: voicemailMessage,
     });
 
@@ -93,6 +95,9 @@ class BlandService {
         start_node_id: config.bland.startNodeId,
       }),
       ...(task && { task }),
+
+      // CRITICAL: Pass request_data so pathway can access customer info
+      request_data: requestData,
 
       // Phone numbers
       ...(config.bland.from && { from: config.bland.from }),
@@ -109,10 +114,10 @@ class BlandService {
       block_interruptions: config.bland.blockInterruptions,
       record: config.bland.record,
 
-      // First sentence
+      // First sentence (with template variables for Bland to replace)
       ...(firstSentence && { first_sentence: firstSentence }),
 
-      // Voicemail settings (personalized with customer's first name)
+      // Voicemail settings (pre-personalized since Bland can't access request_data in voicemail)
       voicemail_message: voicemailMessage,
       ...(config.bland.voicemailAction && {
         voicemail_action: config.bland.voicemailAction as

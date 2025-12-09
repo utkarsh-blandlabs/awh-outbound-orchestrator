@@ -123,27 +123,34 @@ class CallStateManagerClass {
   }
 
   /**
-   * Clean up old pending calls (older than 30 minutes)
+   * Clean up old pending calls (older than 90 minutes)
+   * Extended to 90 minutes because agents can take up to 1 hour 20 minutes to close calls
    * This prevents memory leaks from calls that never complete
    */
   cleanupOldCalls(): void {
     const now = Date.now();
-    const maxAge = 30 * 60 * 1000; // 30 minutes
+    const maxAge = 90 * 60 * 1000; // 90 minutes (1.5 hours)
 
     let cleanedCount = 0;
     for (const [callId, call] of this.pendingCalls.entries()) {
       if (now - call.created_at > maxAge) {
         this.pendingCalls.delete(callId);
         cleanedCount++;
-        logger.warn("🧹 Cleaned up stale pending call", {
+        logger.warn("🧹 CLEANUP | Stale pending call removed", {
           call_id: callId,
+          lead_id: call.lead_id,
+          phone: call.phone_number,
           age_minutes: Math.round((now - call.created_at) / 60000),
+          status: call.status,
         });
       }
     }
 
     if (cleanedCount > 0) {
-      logger.info(`🧹 Cleaned up ${cleanedCount} stale pending calls`);
+      logger.info(`🧹 CLEANUP | Removed ${cleanedCount} stale calls (>90min)`, {
+        remaining_calls: this.pendingCalls.size,
+        stats: this.getStats(),
+      });
     }
   }
 

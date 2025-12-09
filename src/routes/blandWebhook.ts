@@ -27,16 +27,16 @@ const router = Router();
 router.post("/bland-callback", async (req: Request, res: Response) => {
   const requestId = `bland_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`;
 
-  logger.info("📥 Received Bland webhook callback", {
-    request_id: requestId,
+  logger.info("🎯 WEBHOOK | Bland callback received", {
+    requestId,
     call_id: req.body.call_id || req.body.c_id,
     status: req.body.status,
     completed: req.body.completed,
   });
 
   // Log the full webhook payload for debugging
-  logger.debug("📝 Bland Webhook - Full Payload", {
-    request_id: requestId,
+  logger.debug("📋 WEBHOOK | Bland full payload", {
+    requestId,
     full_payload: req.body,
   });
 
@@ -44,14 +44,17 @@ router.post("/bland-callback", async (req: Request, res: Response) => {
     // Extract call_id from webhook
     const callId = req.body.call_id || req.body.c_id;
     if (!callId) {
+      logger.error("❌ VALIDATION | Missing call_id in webhook payload", {
+        requestId,
+      });
       throw new Error("Missing call_id in webhook payload");
     }
 
     // Parse the transcript from webhook data
     const transcript = parseTranscriptFromWebhook(req.body);
 
-    logger.info("📞 Call completed via webhook", {
-      request_id: requestId,
+    logger.info("✅ STEP 3 | Bland call completed and transcript retrieved", {
+      requestId,
       call_id: callId,
       outcome: transcript.outcome,
       duration: transcript.duration,
@@ -62,32 +65,44 @@ router.post("/bland-callback", async (req: Request, res: Response) => {
     const callState = CallStateManager.getPendingCall(callId);
 
     if (!callState) {
-      logger.warn("⚠️ No pending call found for this call_id", {
-        request_id: requestId,
+      logger.warn("⚠️ STATE | No pending call found for this call_id", {
+        requestId,
         call_id: callId,
+        cache_stats: CallStateManager.getStats(),
       });
 
       // Still respond with 200 to acknowledge receipt
       return res.status(200).json({
         success: true,
         message: "Webhook received (no pending call found)",
-        request_id: requestId,
+        requestId,
       });
     }
+
+    logger.info("💾 STATE | Call state retrieved for webhook matching", {
+      requestId,
+      call_id: callId,
+      lead_id: callState.lead_id,
+      phone: callState.phone_number,
+      name: `${callState.first_name} ${callState.last_name}`,
+    });
 
     // Process in background - fire and forget
     processCallCompletion(callState, transcript, requestId)
       .then(() => {
-        logger.info("✅ Call completion processing finished", {
-          request_id: requestId,
+        logger.info("✅ FLOW COMPLETE | Call completion processing finished", {
+          requestId,
           call_id: callId,
+          lead_id: callState.lead_id,
         });
       })
       .catch((error) => {
-        logger.error("❌ Error processing call completion", {
-          request_id: requestId,
+        logger.error("❌ FLOW ERROR | Call completion processing failed", {
+          requestId,
           call_id: callId,
+          lead_id: callState.lead_id,
           error: error.message,
+          error_stack: error.stack,
         });
       });
 
@@ -95,11 +110,11 @@ router.post("/bland-callback", async (req: Request, res: Response) => {
     res.status(200).json({
       success: true,
       message: "Webhook received, processing call completion",
-      request_id: requestId,
+      requestId,
     });
   } catch (error: any) {
-    logger.error("❌ Error handling Bland webhook", {
-      request_id: requestId,
+    logger.error("❌ WEBHOOK ERROR | Error handling Bland webhook", {
+      requestId,
       error: error.message,
       stack: error.stack,
     });
@@ -108,7 +123,7 @@ router.post("/bland-callback", async (req: Request, res: Response) => {
     res.status(200).json({
       success: false,
       error: error.message,
-      request_id: requestId,
+      requestId,
     });
   }
 });
@@ -121,43 +136,60 @@ async function processCallCompletion(
   transcript: BlandTranscript,
   requestId: string
 ): Promise<void> {
+  const logContext = {
+    requestId,
+    lead_id: callState.lead_id,
+    call_id: callState.call_id,
+    phone: callState.phone_number,
+    name: `${callState.first_name} ${callState.last_name}`,
+  };
+
   try {
-    logger.info("🔀 Stage: CONVOSO_UPDATE - Starting", {
-      request_id: requestId,
-      lead_id: callState.lead_id,
-      call_id: callState.call_id,
+    logger.info("▶️ STEP 4 START | Updating Convoso call log", {
+      ...logContext,
+      bland_outcome: transcript.outcome,
     });
 
-    // Update Convoso call log
+    // Update Convoso call log (Step 4)
     await convosoService.updateCallLog(
       callState.lead_id,
       callState.phone_number,
       transcript
     );
 
-    logger.info("✅ Stage: CONVOSO_UPDATE - Completed", {
-      request_id: requestId,
-      lead_id: callState.lead_id,
+    logger.info("✅ STEP 4 COMPLETE | Convoso call log updated", {
+      ...logContext,
+      bland_outcome: transcript.outcome,
     });
 
     // Mark call as completed
     CallStateManager.completeCall(callState.call_id);
 
-    logger.info("✅ Full orchestration completed successfully", {
-      request_id: callState.request_id,
-      lead_id: callState.lead_id,
-      call_id: callState.call_id,
+    logger.info("💾 STATE | Call marked as completed", {
+      ...logContext,
+      cache_stats: CallStateManager.getStats(),
+    });
+
+    logger.info("✅ FLOW SUCCESS | Full orchestration completed successfully", {
+      ...logContext,
+      original_request_id: callState.request_id,
       outcome: transcript.outcome,
+      duration: transcript.duration,
     });
   } catch (error: any) {
-    logger.error("❌ Failed to update Convoso", {
-      request_id: requestId,
-      lead_id: callState.lead_id,
+    logger.error("❌ STEP 4 ERROR | Failed to update Convoso", {
+      ...logContext,
       error: error.message,
+      error_stack: error.stack,
     });
 
     // Mark call as failed
     CallStateManager.failCall(callState.call_id, error.message);
+
+    logger.error("💾 STATE | Call marked as failed", {
+      ...logContext,
+      error: error.message,
+    });
   }
 }
 

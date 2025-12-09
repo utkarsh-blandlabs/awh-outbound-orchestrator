@@ -48,15 +48,19 @@ router.post("/call-back", async (req: Request, res: Response) => {
   const requestId = `cb_${Date.now()}_${Math.random().toString(36).substring(2, 11)}`;
 
   try {
-    logger.info("Callback webhook triggered", {
+    logger.info("🎯 WEBHOOK | Callback received from Convoso", {
       requestId,
-      body: req.body,
+      phone: req.body.phone_number,
+      lead_id: req.body.lead_id,
+      status: req.body.status,
+      name: `${req.body.first_name} ${req.body.last_name}`,
     });
 
     // Validate required fields
     const payload: CallbackPayload = req.body;
 
     if (!payload.phone_number) {
+      logger.error("❌ VALIDATION | Missing phone_number", { requestId });
       return res.status(400).json({
         success: false,
         error: "Missing required field: phone_number",
@@ -65,6 +69,11 @@ router.post("/call-back", async (req: Request, res: Response) => {
     }
 
     if (!payload.first_name || !payload.last_name) {
+      logger.error("❌ VALIDATION | Missing name fields", {
+        requestId,
+        has_first_name: !!payload.first_name,
+        has_last_name: !!payload.last_name,
+      });
       return res.status(400).json({
         success: false,
         error: "Missing required fields: first_name and last_name",
@@ -73,6 +82,7 @@ router.post("/call-back", async (req: Request, res: Response) => {
     }
 
     if (!payload.lead_id) {
+      logger.error("❌ VALIDATION | Missing lead_id", { requestId });
       return res.status(400).json({
         success: false,
         error: "Missing required field: lead_id",
@@ -125,22 +135,27 @@ router.post("/call-back", async (req: Request, res: Response) => {
  * 4. Update Convoso (happens in bland-callback webhook)
  */
 async function processCallback(payload: CallbackPayload, requestId: string): Promise<void> {
+  const logContext = {
+    requestId,
+    lead_id: payload.lead_id,
+    phone: payload.phone_number,
+    name: `${payload.first_name} ${payload.last_name}`,
+  };
+
   try {
-    logger.info("🎯 Starting callback processing", {
-      requestId,
-      phone: payload.phone_number,
-      lead_id: payload.lead_id,
-      status: payload.status,
+    logger.info("▶️ FLOW START | Processing callback webhook", {
+      ...logContext,
+      initial_status: payload.status,
     });
 
-    // STEP 1: ✅ Already received trigger data from Convoso
+    // ═══════════════════════════════════════════════════════════════
+    // STEP 1: ✅ Trigger received from Convoso
+    // ═══════════════════════════════════════════════════════════════
 
-    // STEP 2: Send phone call to Bland.ai
-    logger.info("📞 Step 2: Initiating Bland.ai call", {
-      requestId,
-      phone: payload.phone_number,
-      lead_id: payload.lead_id,
-    });
+    // ═══════════════════════════════════════════════════════════════
+    // STEP 2: 📞 Initiate Bland.ai Call
+    // ═══════════════════════════════════════════════════════════════
+    logger.info("📞 STEP 2 | Initiating Bland.ai call", logContext);
 
     const blandCallResponse = await blandService.sendOutboundCall({
       phoneNumber: payload.phone_number,
@@ -149,14 +164,15 @@ async function processCallback(payload: CallbackPayload, requestId: string): Pro
     });
 
     const callId = blandCallResponse.call_id;
-    logger.info("✅ Bland.ai call initiated successfully", {
-      requestId,
-      callId,
-      lead_id: payload.lead_id,
-      status: blandCallResponse.status,
+    logger.info("✅ STEP 2 COMPLETE | Bland.ai call initiated", {
+      ...logContext,
+      call_id: callId,
+      bland_status: blandCallResponse.status,
     });
 
-    // CRITICAL: Store call state so bland-callback webhook can find lead_id
+    // ═══════════════════════════════════════════════════════════════
+    // CRITICAL: Store Call State for Webhook Matching
+    // ═══════════════════════════════════════════════════════════════
     CallStateManager.addPendingCall(
       callId,
       requestId,
@@ -166,41 +182,38 @@ async function processCallback(payload: CallbackPayload, requestId: string): Pro
       payload.last_name
     );
 
-    logger.info("📝 Call state stored for webhook callback", {
-      requestId,
-      callId,
-      lead_id: payload.lead_id,
+    logger.info("💾 STATE | Call state stored for webhook matching", {
+      ...logContext,
+      call_id: callId,
+      cache_stats: CallStateManager.getStats(),
     });
 
-    // STEP 3 & 4: Get transcript and update Convoso
-    // Note: These happen later via the bland-callback webhook
-    // When the call completes, Bland.ai will POST to /webhooks/bland-callback
+    // ═══════════════════════════════════════════════════════════════
+    // STEP 3 & 4: ⏳ Waiting for Bland.ai Webhook
+    // ═══════════════════════════════════════════════════════════════
+    // When call completes, Bland.ai POSTs to /webhooks/bland-callback
     // That webhook will:
-    //   - Fetch the transcript from Bland.ai
-    //   - Map outcome to Convoso status code
-    //   - Update Convoso with transcript and status
-    logger.info("⏳ Steps 3 & 4: Waiting for call completion", {
-      requestId,
-      callId,
-      lead_id: payload.lead_id,
-      note: "Bland.ai will POST to /webhooks/bland-callback when call completes",
-      bland_callback_url: "BLAND_WEBHOOK_URL from .env",
+    //   1. Retrieve call state (using call_id)
+    //   2. Get full transcript from Bland.ai
+    //   3. Map outcome to Convoso status code
+    //   4. Update Convoso with transcript + status
+    logger.info("⏳ STEPS 3-4 PENDING | Waiting for call completion webhook", {
+      ...logContext,
+      call_id: callId,
+      next_webhook: "/webhooks/bland-callback",
+      max_wait_time: "90 minutes",
     });
 
-    logger.info("🎉 Callback processing completed - call in progress", {
-      requestId,
-      callId,
-      lead_id: payload.lead_id,
-      phone: payload.phone_number,
+    logger.info("✅ FLOW ACTIVE | Call in progress, monitoring for completion", {
+      ...logContext,
+      call_id: callId,
     });
 
   } catch (error: any) {
-    logger.error("❌ Callback processing failed", {
-      requestId,
+    logger.error("❌ FLOW ERROR | Callback processing failed", {
+      ...logContext,
       error: error.message,
-      stack: error.stack,
-      phone: payload.phone_number,
-      lead_id: payload.lead_id,
+      error_stack: error.stack,
     });
     throw error;
   }

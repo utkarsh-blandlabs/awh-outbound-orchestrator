@@ -41,6 +41,10 @@ export interface BlandOutboundCallRequest {
   transfer_phone_number?: string;
   start_node_id?: string;
 
+  // Request data (key-value store for AI to access during call)
+  // The pathway can access these values via {{key}} syntax
+  request_data?: Record<string, any>;
+
   // Voice and behavior
   voice?: string;
   max_duration?: number;
@@ -94,29 +98,93 @@ export enum CallOutcome {
 }
 
 /**
- * Convoso status codes mapping
+ * Complete Convoso status codes mapping
  * Maps Bland.ai call outcomes to Convoso status abbreviations
+ *
+ * IMPORTANT: Convoso requires ONLY the abbreviation, not the description
+ *
+ * HUMAN Contact Types (Agent-related outcomes):
  */
 export const CONVOSO_STATUS_MAP: Record<string, string> = {
-  // Call outcomes
-  transferred: "CALLXR",
-  voicemail: "A", // Answering Machine
-  callback: "CALLBK",
-  sale: "SALE",
-  confused: "CC", // Confused Caller
-  not_interested: "NI",
-  no_answer: "NOANSR",
-  busy: "UB", // Line is Busy
-  hang_up: "HU",
-  customer_disconnected: "CD",
-  dead_air: "DEADAR",
-  language_barrier: "LB",
-  wrong_number: "WRONG",
-  bad_phone_number: "BPN",
-  interested: "INST",
-  qualified_no_sale: "QNSALE",
+  // === HUMAN CONTACT TYPES ===
+  // Sales and Transfers
+  "sale": "SALE",
+  "sold": "SALE",
+  "transferred": "CALLXR",
+  "transfer": "CALLXR",
+  "aca_transfer": "ACA",
+  "aca": "ACA",
+  "front_transfer": "FRONT",
+  "front_handoff": "FRONT",
+  "spanish_transfer": "SPA",
+  "spanish": "SPA",
+  "customer_service": "TCR",
+
+  // Call Status
+  "voicemail": "A",
+  "answering_machine": "A",
+  "machine": "A",
+  "callback": "CALLBK",
+  "call_back": "CALLBK",
+  "requested_callback": "CB",
+  "not_interested": "NI",
+  "ni": "NI",
+  "interested": "INST",
+  "qualified_no_sale": "QNSALE",
+  "confused": "CC",
+  "confused_caller": "CC",
+
+  // Availability
+  "not_available": "NOTA",
+  "post_date": "POST",
+  "requested_form": "1095A",
+  "form_request": "1095A",
+
+  // Negative Outcomes
+  "bad_state": "BACA",
+  "cannot_afford": "CA",
+  "no_coverage": "NOTCOV",
+  "declined_sale": "PIKER",
+  "piker": "PIKER",
+  "wrong_number": "WRONG",
+  "bad_phone": "BPN",
+  "bad_phone_number": "BPN",
+  "disqualified": "MGMTNQ",
+
+  // Inquiries
+  "medicaid": "MCAID",
+  "medicare": "MCARE",
+  "medicare_tricare": "TRICAR",
+  "id_request": "REQID",
+
+  // === SYSTEM CONTACT TYPES ===
+  "no_answer": "NOANSR",
+  "busy": "UB",
+  "system_busy": "B",
+  "hang_up": "HU",
+  "hangup": "HU",
+  "caller_hung_up": "CALLHU",
+  "customer_disconnected": "CD",
+  "disconnected": "CD",
+  "dead_air": "DEADAR",
+  "language_barrier": "LB",
+  "congestion": "CG",
+  "disconnected_number": "DC",
+  "do_not_call": "DNC",
+  "dnc": "DNC",
+  "agent_not_available": "DROP",
+  "agent_lost_connection": "ERI",
+  "call_done": "DONE",
+  "call_rejected": "REJ",
+  "operator_intercept": "OI",
+  "pbx_hung_up": "PBXHU",
+  "call_picked_up": "PU",
+  "incomplete": "INCOMP",
+  "new_lead": "NEW",
+  "failed": "N", // Dead Air/System Glitch
+
   // Default fallback
-  unknown: "UNKNWN",
+  "unknown": "UNKNWN",
 }
 
 /**
