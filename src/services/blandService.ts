@@ -133,9 +133,37 @@ class BlandService {
       wait: false, // Don't wait for call to complete (async)
     };
 
-    // Log the request body being sent to Bland
-    logger.debug("📤 Bland API Request Body", {
-      request_body: requestBody,
+    // Log the FULL request body being sent to Bland (for debugging)
+    logger.info("📤 BLAND REQUEST | Full API request being sent", {
+      endpoint: "/v1/calls",
+      method: "POST",
+      phone_number: requestBody.phone_number,
+      pathway_id: requestBody.pathway_id,
+      start_node_id: requestBody.start_node_id,
+      from: requestBody.from,
+      transfer_phone_number: requestBody.transfer_phone_number,
+      voice: requestBody.voice,
+      max_duration: requestBody.max_duration,
+      amd: requestBody.amd,
+      answered_by_enabled: requestBody.answered_by_enabled,
+      wait_for_greeting: requestBody.wait_for_greeting,
+      block_interruptions: requestBody.block_interruptions,
+      record: requestBody.record,
+      sensitive_voicemail_detection: requestBody.sensitive_voicemail_detection,
+      voicemail_action: requestBody.voicemail_action,
+      webhook: requestBody.webhook,
+      wait: requestBody.wait,
+    });
+
+    logger.info("📤 BLAND REQUEST | Request data being passed", {
+      request_data: requestBody.request_data,
+    });
+
+    logger.info("📤 BLAND REQUEST | Templates with placeholders", {
+      task_length: requestBody.task?.length,
+      task_preview: requestBody.task?.substring(0, 200),
+      first_sentence: requestBody.first_sentence,
+      voicemail_message: requestBody.voicemail_message,
     });
 
     try {
@@ -151,11 +179,11 @@ class BlandService {
         }
       );
 
-      // Log full Bland call initiation response
-      logger.debug("📞 Bland API - Call Initiation Response", {
-        full_response: response,
+      // Log FULL Bland call initiation response
+      logger.info("📥 BLAND RESPONSE | Call initiation response received", {
         call_id: response.call_id,
         status: response.status,
+        full_response: JSON.stringify(response, null, 2),
       });
 
       logger.info("Bland call initiated successfully", {

@@ -34,10 +34,42 @@ router.post("/bland-callback", async (req: Request, res: Response) => {
     completed: req.body.completed,
   });
 
-  // Log the full webhook payload for debugging
-  logger.debug("📋 WEBHOOK | Bland full payload", {
+  // Log the COMPLETE webhook payload for debugging the loop issue
+  logger.info("📋 BLAND WEBHOOK | Complete payload received from Bland", {
     requestId,
-    full_payload: req.body,
+    call_id: req.body.call_id || req.body.c_id,
+    status: req.body.status,
+    completed: req.body.completed,
+    answered_by: req.body.answered_by,
+    call_ended_by: req.body.call_ended_by,
+    call_length: req.body.call_length,
+    corrected_duration: req.body.corrected_duration,
+    error_message: req.body.error_message,
+    full_payload: JSON.stringify(req.body, null, 2),
+  });
+
+  // Log transcript specifically
+  logger.info("📋 BLAND WEBHOOK | Transcript data", {
+    requestId,
+    call_id: req.body.call_id || req.body.c_id,
+    concatenated_transcript: req.body.concatenated_transcript,
+    summary: req.body.summary,
+  });
+
+  // Log variables extracted by pathway
+  logger.info("📋 BLAND WEBHOOK | Variables extracted from pathway", {
+    requestId,
+    call_id: req.body.call_id || req.body.c_id,
+    variables: req.body.variables,
+  });
+
+  // Log transfer information
+  logger.info("📋 BLAND WEBHOOK | Transfer information", {
+    requestId,
+    call_id: req.body.call_id || req.body.c_id,
+    transferred_to: req.body.transferred_to,
+    transferred_at: req.body.transferred_at,
+    warm_transfer_call: req.body.warm_transfer_call,
   });
 
   try {
@@ -59,6 +91,21 @@ router.post("/bland-callback", async (req: Request, res: Response) => {
       outcome: transcript.outcome,
       duration: transcript.duration,
       answered_by: transcript.answered_by,
+    });
+
+    // Log the PARSED transcript details
+    logger.info("📊 STEP 3 | Parsed transcript details", {
+      requestId,
+      call_id: callId,
+      outcome: transcript.outcome,
+      plan_type: transcript.plan_type,
+      member_count: transcript.member_count,
+      zip: transcript.zip,
+      state: transcript.state,
+      transferred_to: transcript.transferred_to,
+      transferred_at: transcript.transferred_at,
+      warm_transfer_call: transcript.warm_transfer_call,
+      pathway_tags: transcript.pathway_tags,
     });
 
     // Get the pending call state (includes lead_id, phone_number, etc.)
@@ -242,20 +289,40 @@ function parseTranscriptFromWebhook(raw: any): BlandTranscript {
  * Determine call outcome from Bland webhook data
  */
 function determineOutcome(raw: any): CallOutcome {
+  const callId = raw.call_id || raw.c_id;
+
+  logger.info("🔍 OUTCOME DETERMINATION | Starting outcome analysis", {
+    call_id: callId,
+    warm_transfer_call: raw.warm_transfer_call,
+    warm_transfer_state: raw.warm_transfer_call?.state,
+    answered_by: raw.answered_by,
+    completed: raw.completed,
+    status: raw.status,
+    error_message: raw.error_message,
+    variables: raw.variables,
+  });
+
   // If there was a warm transfer, it was transferred
   if (raw.warm_transfer_call && raw.warm_transfer_call.state === "MERGED") {
+    logger.info("🔍 OUTCOME | TRANSFERRED (warm transfer merged)", {
+      call_id: callId,
+      warm_transfer_state: raw.warm_transfer_call.state,
+    });
     return CallOutcome.TRANSFERRED;
   }
 
   // Check answered_by field
   const answeredBy = raw.answered_by?.toLowerCase();
   if (answeredBy === "voicemail") {
+    logger.info("🔍 OUTCOME | VOICEMAIL", { call_id: callId });
     return CallOutcome.VOICEMAIL;
   }
   if (answeredBy === "no-answer" || answeredBy === "no_answer") {
+    logger.info("🔍 OUTCOME | NO_ANSWER", { call_id: callId });
     return CallOutcome.NO_ANSWER;
   }
   if (answeredBy === "busy") {
+    logger.info("🔍 OUTCOME | BUSY", { call_id: callId });
     return CallOutcome.BUSY;
   }
 
@@ -263,18 +330,39 @@ function determineOutcome(raw: any): CallOutcome {
   if (raw.completed && answeredBy === "human") {
     // Check if there's a callback request in variables
     if (raw.variables?.callback_requested === true) {
+      logger.info("🔍 OUTCOME | CALLBACK (callback_requested=true)", {
+        call_id: callId,
+        variables: raw.variables,
+      });
       return CallOutcome.CALLBACK;
     }
     // Default to transferred if completed with human
+    logger.info("🔍 OUTCOME | TRANSFERRED (completed with human, no callback)", {
+      call_id: callId,
+      answered_by: answeredBy,
+      completed: raw.completed,
+    });
     return CallOutcome.TRANSFERRED;
   }
 
   // Check error status
   if (raw.error_message || raw.status === "failed") {
+    logger.info("🔍 OUTCOME | FAILED", {
+      call_id: callId,
+      error_message: raw.error_message,
+      status: raw.status,
+    });
     return CallOutcome.FAILED;
   }
 
   // Default - confused caller (unable to determine outcome)
+  logger.warn("🔍 OUTCOME | CONFUSED (default fallback)", {
+    call_id: callId,
+    answered_by: answeredBy,
+    completed: raw.completed,
+    status: raw.status,
+    note: "Unable to determine specific outcome",
+  });
   return CallOutcome.CONFUSED;
 }
 

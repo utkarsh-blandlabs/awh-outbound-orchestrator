@@ -174,6 +174,17 @@ class ConvosoService {
       status: convosoStatus, // IMPORTANT: Only abbreviation, not description
     };
 
+    // Log what we're sending to Convoso
+    logger.info("📤 CONVOSO REQUEST | Sending call log update", {
+      endpoint: "/v1/log/update",
+      lead_id: leadId,
+      phone_number: phoneNumber,
+      status: convosoStatus,
+      bland_outcome: transcript.outcome,
+      transcript_preview: callTranscript.substring(0, 300),
+      full_request_data: requestData,
+    });
+
     try {
       const response = await retry(
         async () => {
