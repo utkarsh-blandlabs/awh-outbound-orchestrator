@@ -2,17 +2,16 @@
  * Callback Webhook Route
  *
  * Zapier replacement endpoint that:
- * 1. Receives callback trigger with customer data
+ * 1. Receives trigger event with customer data from Convoso
  * 2. Initiates Bland.ai phone call
- * 3. Queries Convoso for call logs
- * 4. Retrieves transcript from Bland.ai
+ * 3. Retrieves transcript from Bland.ai (via bland-callback webhook)
+ * 4. Updates Convoso with call logs and status
  *
  * Endpoint: POST /webhooks/call-back
  */
 
 import { Router, Request, Response } from "express";
 import { blandService } from "../services/blandService";
-import { getConvosoCallLogs } from "../services/convosoService";
 import { logger } from "../utils/logger";
 
 const router = Router();
@@ -21,26 +20,31 @@ interface CallbackPayload {
   phone_number: string;
   first_name: string;
   last_name: string;
-  queue_id?: string;
+  status: string; // Convoso status code (A, CALLBK, SALE, etc.)
+  lead_id: string;
+  list_id: string;
   // Optional fields
+  email?: string;
+  address1?: string;
   age?: string;
   state?: string;
   city?: string;
   postal_code?: string;
   date_of_birth?: string;
-  lead_id?: string;
+  plan_type?: string;
 }
 
 /**
  * POST /webhooks/call-back
  *
- * Zapier-style callback webhook that orchestrates:
- * - Bland.ai call initiation
- * - Convoso call log retrieval
- * - Bland.ai transcript retrieval
+ * Zapier replacement webhook that orchestrates:
+ * 1. Receive trigger event (customer data from Convoso)
+ * 2. Send phone call (Bland.ai)
+ * 3. Get transcript (Bland.ai via bland-callback webhook)
+ * 4. Update call logs (Convoso with transcript and status)
  */
 router.post("/call-back", async (req: Request, res: Response) => {
-  const requestId = `cb_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+  const requestId = `cb_${Date.now()}_${Math.random().toString(36).substring(2, 11)}`;
 
   try {
     logger.info("Callback webhook triggered", {
@@ -67,12 +71,21 @@ router.post("/call-back", async (req: Request, res: Response) => {
       });
     }
 
+    if (!payload.lead_id) {
+      return res.status(400).json({
+        success: false,
+        error: "Missing required field: lead_id",
+        requestId,
+      });
+    }
+
     // Respond immediately to avoid timeout
     res.status(202).json({
       success: true,
       message: "Callback processing started",
       requestId,
       phone_number: payload.phone_number,
+      lead_id: payload.lead_id,
     });
 
     // Process asynchronously
@@ -104,21 +117,28 @@ router.post("/call-back", async (req: Request, res: Response) => {
 
 /**
  * Process callback asynchronously
- * Mimics Zapier's 4-step flow
+ * Implements the correct Zapier replacement flow:
+ * 1. Receive trigger (already done)
+ * 2. Send phone call (Bland.ai)
+ * 3. Get transcript (happens via bland-callback webhook)
+ * 4. Update Convoso (happens in bland-callback webhook)
  */
 async function processCallback(payload: CallbackPayload, requestId: string): Promise<void> {
   try {
-    logger.info("Starting callback processing", {
+    logger.info("🎯 Starting callback processing", {
       requestId,
       phone: payload.phone_number,
+      lead_id: payload.lead_id,
+      status: payload.status,
     });
 
-    // STEP 1: Already received trigger data
+    // STEP 1: ✅ Already received trigger data from Convoso
 
     // STEP 2: Send phone call to Bland.ai
-    logger.info("Step 2: Initiating Bland.ai call", {
+    logger.info("📞 Step 2: Initiating Bland.ai call", {
       requestId,
       phone: payload.phone_number,
+      lead_id: payload.lead_id,
     });
 
     const blandCallResponse = await blandService.sendOutboundCall({
@@ -128,66 +148,41 @@ async function processCallback(payload: CallbackPayload, requestId: string): Pro
     });
 
     const callId = blandCallResponse.call_id;
-    logger.info("Bland.ai call initiated successfully", {
+    logger.info("✅ Bland.ai call initiated successfully", {
       requestId,
       callId,
+      lead_id: payload.lead_id,
       status: blandCallResponse.status,
     });
 
-    // STEP 3: Get call logs from Convoso
-    if (payload.queue_id) {
-      logger.info("Step 3: Querying Convoso call logs", {
-        requestId,
-        queueId: payload.queue_id,
-        phone: payload.phone_number,
-      });
-
-      try {
-        const convosoLogs = await getConvosoCallLogs({
-          queueId: payload.queue_id,
-          phoneNumber: payload.phone_number,
-          firstName: payload.first_name,
-          lastName: payload.last_name,
-          includeRecordings: false,
-        });
-
-        logger.info("Convoso call logs retrieved", {
-          requestId,
-          logsFound: convosoLogs.length,
-          logs: convosoLogs,
-        });
-      } catch (convosoError: any) {
-        logger.warn("Convoso call logs query failed (non-critical)", {
-          requestId,
-          error: convosoError.message,
-        });
-        // Don't fail the entire process if Convoso query fails
-      }
-    } else {
-      logger.info("Step 3: Skipped (no queue_id provided)", { requestId });
-    }
-
-    // STEP 4: Get transcript from Bland.ai
-    // Note: This happens later via the bland-callback webhook
-    // We just log that we're waiting for it
-    logger.info("Step 4: Transcript will be retrieved via bland-callback webhook", {
+    // STEP 3 & 4: Get transcript and update Convoso
+    // Note: These happen later via the bland-callback webhook
+    // When the call completes, Bland.ai will POST to /webhooks/bland-callback
+    // That webhook will:
+    //   - Fetch the transcript from Bland.ai
+    //   - Update Convoso with transcript and status
+    logger.info("⏳ Steps 3 & 4: Waiting for call completion", {
       requestId,
       callId,
-      note: "Bland.ai will send transcript to /webhooks/bland-callback when call completes",
+      lead_id: payload.lead_id,
+      note: "Bland.ai will POST to /webhooks/bland-callback when call completes",
+      bland_callback_url: "http://56.228.64.116:3000/webhooks/bland-callback",
     });
 
-    logger.info("Callback processing completed successfully", {
+    logger.info("🎉 Callback processing completed - call in progress", {
       requestId,
       callId,
+      lead_id: payload.lead_id,
       phone: payload.phone_number,
     });
 
   } catch (error: any) {
-    logger.error("Callback processing failed", {
+    logger.error("❌ Callback processing failed", {
       requestId,
       error: error.message,
       stack: error.stack,
       phone: payload.phone_number,
+      lead_id: payload.lead_id,
     });
     throw error;
   }

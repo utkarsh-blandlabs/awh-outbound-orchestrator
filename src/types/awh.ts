@@ -85,10 +85,38 @@ export enum CallOutcome {
   TRANSFERRED = "TRANSFERRED",
   VOICEMAIL = "VOICEMAIL",
   CALLBACK = "CALLBACK",
+  SALE = "SALE",
+  CONFUSED = "CONFUSED",
+  NOT_INTERESTED = "NOT_INTERESTED",
   NO_ANSWER = "NO_ANSWER",
   BUSY = "BUSY",
   FAILED = "FAILED",
-  UNKNOWN = "UNKNOWN",
+}
+
+/**
+ * Convoso status codes mapping
+ * Maps Bland.ai call outcomes to Convoso status abbreviations
+ */
+export const CONVOSO_STATUS_MAP: Record<string, string> = {
+  // Call outcomes
+  transferred: "CALLXR",
+  voicemail: "A", // Answering Machine
+  callback: "CALLBK",
+  sale: "SALE",
+  confused: "CC", // Confused Caller
+  not_interested: "NI",
+  no_answer: "NOANSR",
+  busy: "UB", // Line is Busy
+  hang_up: "HU",
+  customer_disconnected: "CD",
+  dead_air: "DEADAR",
+  language_barrier: "LB",
+  wrong_number: "WRONG",
+  bad_phone_number: "BPN",
+  interested: "INST",
+  qualified_no_sale: "QNSALE",
+  // Default fallback
+  unknown: "UNKNWN",
 }
 
 /**

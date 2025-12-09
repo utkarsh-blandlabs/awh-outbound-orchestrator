@@ -104,8 +104,9 @@ export class TranscriptAnalyzer {
     notes: string;
   } {
     // If basic outcome is clear (voicemail, no-answer, etc), use it
+    // Skip CONFUSED and TRANSFERRED as they need deeper analysis
     if (
-      basicOutcome !== CallOutcome.UNKNOWN &&
+      basicOutcome !== CallOutcome.CONFUSED &&
       basicOutcome !== CallOutcome.TRANSFERRED
     ) {
       return {

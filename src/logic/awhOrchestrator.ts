@@ -105,7 +105,7 @@ export async function handleAwhOutbound(
       success: true,
       lead_id: payload.lead_id,
       call_id: callResponse.call_id,
-      outcome: CallOutcome.UNKNOWN, // Will be updated when webhook arrives
+      outcome: CallOutcome.NO_ANSWER, // Will be updated when webhook arrives
     };
   } catch (error: any) {
     const duration = Date.now() - startTime;

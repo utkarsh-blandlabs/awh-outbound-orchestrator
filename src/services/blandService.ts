@@ -355,8 +355,8 @@ class BlandService {
       return CallOutcome.FAILED;
     }
 
-    // Default unknown
-    return CallOutcome.UNKNOWN;
+    // Default - confused caller (unable to determine outcome)
+    return CallOutcome.CONFUSED;
   }
 
   /**

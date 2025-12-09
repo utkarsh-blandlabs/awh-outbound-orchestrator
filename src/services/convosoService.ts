@@ -14,6 +14,7 @@ import {
   ConvosoLeadInsertRequest,
   ConvosoCallLogRequest,
   BlandTranscript,
+  CONVOSO_STATUS_MAP,
 } from "../types/awh";
 
 class ConvosoService {
@@ -103,7 +104,45 @@ class ConvosoService {
   }
 
   /**
-   * Update call log with transcript
+   * Map Bland.ai outcome to Convoso status code
+   * Uses CONVOSO_STATUS_MAP for mapping
+   */
+  private mapOutcomeToConvosoStatus(outcome: string): string {
+    const normalizedOutcome = outcome.toLowerCase().replace(/[_\s-]/g, "_");
+
+    // Direct mapping
+    if (CONVOSO_STATUS_MAP[normalizedOutcome]) {
+      return CONVOSO_STATUS_MAP[normalizedOutcome];
+    }
+
+    // Fuzzy matching for common variations
+    if (normalizedOutcome.includes("transfer")) return "CALLXR";
+    if (normalizedOutcome.includes("voicemail") || normalizedOutcome.includes("machine")) return "A";
+    if (normalizedOutcome.includes("callback") || normalizedOutcome.includes("call_back")) return "CALLBK";
+    if (normalizedOutcome.includes("sale")) return "SALE";
+    if (normalizedOutcome.includes("confus")) return "CC";
+    if (normalizedOutcome.includes("not_interest") || normalizedOutcome.includes("ni")) return "NI";
+    if (normalizedOutcome.includes("no_answer") || normalizedOutcome.includes("noanswer")) return "NOANSR";
+    if (normalizedOutcome.includes("busy")) return "UB";
+    if (normalizedOutcome.includes("hang") || normalizedOutcome.includes("hangup")) return "HU";
+    if (normalizedOutcome.includes("disconnect")) return "CD";
+    if (normalizedOutcome.includes("dead")) return "DEADAR";
+    if (normalizedOutcome.includes("language")) return "LB";
+    if (normalizedOutcome.includes("wrong")) return "WRONG";
+    if (normalizedOutcome.includes("bad_phone")) return "BPN";
+    if (normalizedOutcome.includes("interest")) return "INST";
+    if (normalizedOutcome.includes("qualified")) return "QNSALE";
+
+    // Default fallback - NEVER use UNKNOWN
+    logger.warn("Unknown outcome, defaulting to UNKNWN status", {
+      outcome,
+      normalized: normalizedOutcome,
+    });
+    return "UNKNWN";
+  }
+
+  /**
+   * Update call log with transcript and status
    * Uses /v1/log/update endpoint
    * This is how Convoso receives call outcomes and transcripts
    */
@@ -112,20 +151,25 @@ class ConvosoService {
     phoneNumber: string,
     transcript: BlandTranscript
   ): Promise<void> {
+    // Map Bland outcome to Convoso status
+    const convosoStatus = this.mapOutcomeToConvosoStatus(transcript.outcome);
+
     logger.info("Updating Convoso call log", {
       lead_id: leadId,
       phone_number: phoneNumber,
-      outcome: transcript.outcome,
+      bland_outcome: transcript.outcome,
+      convoso_status: convosoStatus,
     });
 
     // Format transcript for Convoso
-    const callTranscript = this.formatTranscriptForConvoso(transcript);
+    const callTranscript = this.formatTranscriptForConvoso(transcript, convosoStatus);
 
     const requestData: ConvosoCallLogRequest = {
       auth_token: config.convoso.authToken,
       phone_number: phoneNumber,
       lead_id: leadId,
       call_transcript: callTranscript,
+      status: convosoStatus, // Add status to the update
     };
 
     try {
@@ -147,18 +191,22 @@ class ConvosoService {
       logger.debug("🔀 Convoso API - Call Log Update Response", {
         full_response: response,
         lead_id: leadId,
-        outcome: transcript.outcome,
+        bland_outcome: transcript.outcome,
+        convoso_status: convosoStatus,
       });
 
-      logger.info("Call log updated successfully", {
+      logger.info("✅ Call log updated successfully", {
         lead_id: leadId,
-        outcome: transcript.outcome,
+        bland_outcome: transcript.outcome,
+        convoso_status: convosoStatus,
       });
     } catch (error: any) {
       logger.error("Failed to update call log in Convoso", {
         error: error.message,
         response: error.response?.data,
         lead_id: leadId,
+        bland_outcome: transcript.outcome,
+        convoso_status: convosoStatus,
       });
       throw new Error(`Convoso log update error: ${error.message}`);
     }
@@ -166,10 +214,13 @@ class ConvosoService {
 
   /**
    * Format Bland transcript for Convoso
-   * Creates a human-readable summary
+   * Creates a human-readable summary with status
    */
-  private formatTranscriptForConvoso(transcript: BlandTranscript): string {
+  private formatTranscriptForConvoso(transcript: BlandTranscript, convosoStatus: string): string {
     const parts: string[] = [];
+
+    // Add Convoso status at the top
+    parts.push(`Status: ${convosoStatus}`);
     // Call outcome
     parts.push(`Call Outcome: ${transcript.outcome}`);
 
