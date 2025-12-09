@@ -12,6 +12,7 @@
 
 import { Router, Request, Response } from "express";
 import { blandService } from "../services/blandService";
+import { CallStateManager } from "../services/callStateManager";
 import { logger } from "../utils/logger";
 
 const router = Router();
@@ -155,18 +156,35 @@ async function processCallback(payload: CallbackPayload, requestId: string): Pro
       status: blandCallResponse.status,
     });
 
+    // CRITICAL: Store call state so bland-callback webhook can find lead_id
+    CallStateManager.addPendingCall(
+      callId,
+      requestId,
+      payload.lead_id,
+      payload.phone_number,
+      payload.first_name,
+      payload.last_name
+    );
+
+    logger.info("📝 Call state stored for webhook callback", {
+      requestId,
+      callId,
+      lead_id: payload.lead_id,
+    });
+
     // STEP 3 & 4: Get transcript and update Convoso
     // Note: These happen later via the bland-callback webhook
     // When the call completes, Bland.ai will POST to /webhooks/bland-callback
     // That webhook will:
     //   - Fetch the transcript from Bland.ai
+    //   - Map outcome to Convoso status code
     //   - Update Convoso with transcript and status
     logger.info("⏳ Steps 3 & 4: Waiting for call completion", {
       requestId,
       callId,
       lead_id: payload.lead_id,
       note: "Bland.ai will POST to /webhooks/bland-callback when call completes",
-      bland_callback_url: "http://56.228.64.116:3000/webhooks/bland-callback",
+      bland_callback_url: "BLAND_WEBHOOK_URL from .env",
     });
 
     logger.info("🎉 Callback processing completed - call in progress", {
