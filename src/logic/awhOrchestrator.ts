@@ -208,14 +208,54 @@ function getStageEmoji(stage: OrchestrationStage): string {
 }
 
 /**
+ * Normalize phone number to E.164 format required by Bland
+ * Bland requires: +[country code][number]
+ * Example: +16284444907
+ */
+function normalizePhoneNumber(phoneNumber: string): string {
+  // Remove all non-digit characters
+  const digitsOnly = phoneNumber.replace(/\D/g, "");
+
+  // If already has country code (11 digits starting with 1), add +
+  if (digitsOnly.length === 11 && digitsOnly.startsWith("1")) {
+    return `+${digitsOnly}`;
+  }
+
+  // If 10 digits (US number without country code), add +1
+  if (digitsOnly.length === 10) {
+    return `+1${digitsOnly}`;
+  }
+
+  // If already has +, return as-is
+  if (phoneNumber.startsWith("+")) {
+    return phoneNumber;
+  }
+
+  // Default: assume US and add +1
+  logger.warn("Phone number format unclear, assuming US +1", {
+    original: phoneNumber,
+    normalized: `+1${digitsOnly}`,
+  });
+  return `+1${digitsOnly}`;
+}
+
+/**
  * Stage 1: Trigger Bland outbound call with webhook URL
  * Bland will automatically POST to our webhook when the call completes
  */
 async function triggerOutboundCall(
   payload: ConvosoWebhookPayload
 ): Promise<BlandOutboundCallResponse> {
+  // Normalize phone number to E.164 format (+1XXXXXXXXXX)
+  const normalizedPhone = normalizePhoneNumber(payload.phone_number);
+
+  logger.info("Phone number normalized for Bland", {
+    original: payload.phone_number,
+    normalized: normalizedPhone,
+  });
+
   return await blandService.sendOutboundCall({
-    phoneNumber: payload.phone_number,
+    phoneNumber: normalizedPhone,
     firstName: payload.first_name,
     lastName: payload.last_name,
   });
