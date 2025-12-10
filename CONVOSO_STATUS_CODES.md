@@ -2,10 +2,10 @@
 
 ## Overview
 
-Convoso uses **71 official status codes** to categorize call outcomes. These are divided into two main categories:
+Convoso uses **72 status codes** to categorize call outcomes (71 official + 1 custom). These are divided into two main categories:
 
 - **HUMAN (27 codes)**: Call was answered by a human, AI had a conversation
-- **SYSTEM (44 codes)**: Technical/system outcomes, no human conversation occurred
+- **SYSTEM (45 codes)**: Technical/system outcomes, no human conversation occurred (includes custom DNCA)
 
 ## Understanding HUMAN vs SYSTEM
 
@@ -126,6 +126,7 @@ These codes represent **technical or system-level outcomes** where no meaningful
 | Code | Description | Contact Type |
 |------|-------------|--------------|
 | `DNC` | Do NOT Call | SYSTEM |
+| `DNCA` | Do NOT Call Again (customer requested) | SYSTEM |
 | `DNCC` | A match for Campaign DNC settings | SYSTEM |
 | `DNCDEC` | DNC-Carrier Received Decline Request | SYSTEM |
 | `DNCL` | Do NOT Call Hopper Match | SYSTEM |
@@ -198,6 +199,7 @@ If no direct match is found, fuzzy matching is used:
 
 | Bland Outcome | Convoso Code | Type | Description |
 |---------------|--------------|------|-------------|
+| Contains "do_not_call_again", "never_call", "remove_from_list", or "stop_calling" | `DNCA` | SYSTEM | Do NOT Call Again (customer request) - **Priority checked first** |
 | Contains "transfer" | `ACA` | HUMAN | Transferred to ACA |
 | Contains "voicemail" or "machine" | `A` | HUMAN | Answering Machine |
 | Contains "callback" or "call_back" | `CB` | HUMAN | Requested Callback |
@@ -218,6 +220,68 @@ If no match is found, the system defaults to:
 - **Code**: `N` (Dead Air/System Glitch)
 - **Type**: SYSTEM
 - **Reason**: Valid catch-all for unrecognized outcomes
+
+---
+
+## Special Status Code: DNCA (Do Not Call Again)
+
+### What is DNCA?
+
+`DNCA` is a **custom status code** added to handle explicit customer requests to never be called again. This is critical for compliance and respecting customer preferences.
+
+### When to Use DNCA
+
+Use `DNCA` when the call transcript or pathway variables indicate the customer has explicitly requested:
+- "Don't call me again"
+- "Remove me from your list"
+- "Never call this number"
+- "Stop calling me"
+- "Take me off your calling list"
+
+### How It Works
+
+The system automatically detects DNCA requests in two ways:
+
+1. **Direct mapping** - If Bland outcome contains:
+   - `do_not_call_again`
+   - `never_call_again`
+   - `remove_from_list`
+   - `dnca`
+
+2. **Fuzzy matching** (checked FIRST, before other outcomes) - If outcome contains:
+   - `"do_not_call_again"`
+   - `"never_call"`
+   - `"remove_from_list"`
+   - `"stop_calling"`
+
+### Example Scenario
+
+**Customer says**: "Please don't ever call this number again, remove me from your list."
+
+**Expected flow**:
+1. Bland AI detects customer request in transcript
+2. Pathway sets outcome variable: `do_not_call_again`
+3. Webhook received with outcome
+4. System maps to `DNCA` status
+5. Convoso receives status `DNCA`
+6. Lead is marked and should not be called again
+
+**Log example**:
+```javascript
+📤 STEP 4 | Updating Convoso call log
+{
+  lead_id: "123456",
+  bland_outcome: "DO_NOT_CALL_AGAIN",
+  convoso_status: "DNCA",  // ✅ Customer request honored
+}
+```
+
+### Important Notes
+
+- ⚠️ `DNCA` is checked **FIRST** in the fuzzy matching logic (highest priority)
+- ⚠️ This is a **SYSTEM** contact type (no human conversation quality, but human-initiated request)
+- ⚠️ Convoso should automatically block future calls to leads marked with `DNCA`
+- ⚠️ This is critical for compliance with TCPA and customer preferences
 
 ---
 

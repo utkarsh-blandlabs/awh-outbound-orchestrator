@@ -214,6 +214,10 @@ export const CONVOSO_STATUS_MAP: Record<string, string> = {
   // DNC (Do Not Call)
   "do_not_call": "DNC",                     // Do NOT Call
   "dnc": "DNC",
+  "do_not_call_again": "DNCA",              // Do NOT Call Again (customer requested)
+  "dnca": "DNCA",
+  "never_call_again": "DNCA",               // Never call again (customer explicit request)
+  "remove_from_list": "DNCA",               // Customer requested removal
   "dnc_campaign_match": "DNCC",             // A match for Campaign DNC settings
   "dnc_carrier_decline": "DNCDEC",          // DNC-Carrier Received Decline Request
   "dnc_hopper_match": "DNCL",               // Do NOT Call Hopper Match

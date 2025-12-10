@@ -120,6 +120,12 @@ class ConvosoService {
     }
 
     // Fuzzy matching for common variations - ALL CODES ARE VALID
+    // PRIORITY: Check for DNC requests first (compliance-critical)
+    if (normalizedOutcome.includes("do_not_call_again") ||
+        normalizedOutcome.includes("never_call") ||
+        normalizedOutcome.includes("remove_from_list") ||
+        normalizedOutcome.includes("stop_calling")) return "DNCA";   // SYSTEM: Do NOT Call Again (customer request)
+
     if (normalizedOutcome.includes("transfer")) return "ACA";        // HUMAN: Transferred to ACA
     if (normalizedOutcome.includes("voicemail") || normalizedOutcome.includes("machine")) return "A";  // HUMAN: Answering Machine
     if (normalizedOutcome.includes("callback") || normalizedOutcome.includes("call_back")) return "CB";  // HUMAN: Requested Callback
