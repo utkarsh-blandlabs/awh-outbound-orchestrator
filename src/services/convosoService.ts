@@ -106,39 +106,41 @@ class ConvosoService {
   /**
    * Map Bland.ai outcome to Convoso status code
    * Uses CONVOSO_STATUS_MAP for mapping
+   *
+   * All codes are validated against the official Convoso status table (71 codes)
+   * HUMAN codes (27): Call answered by human, AI had conversation
+   * SYSTEM codes (44): Technical outcomes, no human conversation
    */
   private mapOutcomeToConvosoStatus(outcome: string): string {
     const normalizedOutcome = outcome.toLowerCase().replace(/[_\s-]/g, "_");
 
-    // Direct mapping
+    // Direct mapping from CONVOSO_STATUS_MAP
     if (CONVOSO_STATUS_MAP[normalizedOutcome]) {
       return CONVOSO_STATUS_MAP[normalizedOutcome];
     }
 
-    // Fuzzy matching for common variations
-    if (normalizedOutcome.includes("transfer")) return "CALLXR";
-    if (normalizedOutcome.includes("voicemail") || normalizedOutcome.includes("machine")) return "A";
-    if (normalizedOutcome.includes("callback") || normalizedOutcome.includes("call_back")) return "CALLBK";
-    if (normalizedOutcome.includes("sale")) return "SALE";
-    if (normalizedOutcome.includes("confus")) return "CC";
-    if (normalizedOutcome.includes("not_interest") || normalizedOutcome.includes("ni")) return "NI";
-    if (normalizedOutcome.includes("no_answer") || normalizedOutcome.includes("noanswer")) return "NOANSR";
-    if (normalizedOutcome.includes("busy")) return "UB";
-    if (normalizedOutcome.includes("hang") || normalizedOutcome.includes("hangup")) return "HU";
-    if (normalizedOutcome.includes("disconnect")) return "CD";
-    if (normalizedOutcome.includes("dead")) return "DEADAR";
-    if (normalizedOutcome.includes("language")) return "LB";
-    if (normalizedOutcome.includes("wrong")) return "WRONG";
-    if (normalizedOutcome.includes("bad_phone")) return "BPN";
-    if (normalizedOutcome.includes("interest")) return "INST";
-    if (normalizedOutcome.includes("qualified")) return "QNSALE";
+    // Fuzzy matching for common variations - ALL CODES ARE VALID
+    if (normalizedOutcome.includes("transfer")) return "ACA";        // HUMAN: Transferred to ACA
+    if (normalizedOutcome.includes("voicemail") || normalizedOutcome.includes("machine")) return "A";  // HUMAN: Answering Machine
+    if (normalizedOutcome.includes("callback") || normalizedOutcome.includes("call_back")) return "CB";  // HUMAN: Requested Callback
+    if (normalizedOutcome.includes("sale")) return "SALE";           // HUMAN: Sale
+    if (normalizedOutcome.includes("confus")) return "CD";           // HUMAN: Customer Disconnected (confused caller)
+    if (normalizedOutcome.includes("not_interest") || normalizedOutcome.includes("ni")) return "NI";  // HUMAN: Not Interested
+    if (normalizedOutcome.includes("no_answer") || normalizedOutcome.includes("noanswer")) return "NA";  // SYSTEM: No Answer AutoDial
+    if (normalizedOutcome.includes("busy")) return "B";              // SYSTEM: System Busy
+    if (normalizedOutcome.includes("hang") || normalizedOutcome.includes("hangup")) return "CALLHU";    // SYSTEM: Caller Hung Up
+    if (normalizedOutcome.includes("disconnect")) return "DC";       // SYSTEM: Disconnected Number
+    if (normalizedOutcome.includes("dead")) return "N";              // SYSTEM: Dead Air/System Glitch
+    if (normalizedOutcome.includes("wrong")) return "WRONG";         // HUMAN: Wrong Number
+    if (normalizedOutcome.includes("bad_phone")) return "BPN";       // HUMAN: Bad Phone Number
 
-    // Default fallback - NEVER use UNKNOWN
-    logger.warn("Unknown outcome, defaulting to UNKNWN status", {
+    // Default fallback - Dead Air/System Glitch (valid SYSTEM code)
+    logger.warn("Unknown outcome, defaulting to N (Dead Air/System Glitch)", {
       outcome,
       normalized: normalizedOutcome,
+      note: "This is a valid SYSTEM status code for unrecognized outcomes",
     });
-    return "UNKNWN";
+    return "N";  // Dead Air/System Glitch - valid fallback for unknown outcomes
   }
 
   /**

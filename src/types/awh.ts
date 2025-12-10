@@ -109,93 +109,155 @@ export enum CallOutcome {
 }
 
 /**
- * Complete Convoso status codes mapping
+ * Complete Convoso status codes mapping (All 71 official codes)
  * Maps Bland.ai call outcomes to Convoso status abbreviations
  *
  * IMPORTANT: Convoso requires ONLY the abbreviation, not the description
  *
- * HUMAN Contact Types (Agent-related outcomes):
+ * === Contact Type Categories ===
+ *
+ * HUMAN (27 codes): Call was answered by a human. AI had a conversation.
+ *   - These represent outcomes from actual conversations with people
+ *   - Examples: Sale, Not Interested, Callback Request, Transfer
+ *
+ * SYSTEM (44 codes): Technical/system outcomes. No human conversation.
+ *   - These represent technical issues, no-answers, or system-level blocks
+ *   - Examples: No Answer, Busy, DNC, Disconnected Number, Fax
  */
 export const CONVOSO_STATUS_MAP: Record<string, string> = {
-  // === HUMAN CONTACT TYPES ===
-  // Sales and Transfers
-  "sale": "SALE",
-  "sold": "SALE",
-  "transferred": "CALLXR",
-  "transfer": "CALLXR",
-  "aca_transfer": "ACA",
-  "aca": "ACA",
-  "front_transfer": "FRONT",
-  "front_handoff": "FRONT",
-  "spanish_transfer": "SPA",
-  "spanish": "SPA",
-  "customer_service": "TCR",
+  // ============================================================================
+  // HUMAN CONTACT TYPES (27 codes)
+  // Call was answered by a human - AI had a conversation
+  // ============================================================================
 
-  // Call Status
-  "voicemail": "A",
+  // Sales and Successful Outcomes
+  "sale": "SALE",                           // Sale
+  "sold": "SALE",
+
+  // Transfers
+  "transferred": "ACA",                     // Transferred to ACA (default transfer)
+  "transfer": "ACA",
+  "aca_transfer": "ACA",                    // Transferred to ACA
+  "aca": "ACA",
+  "basaca": "BASACA",                       // Transfer to ACA (alternate)
+  "front_transfer": "FRONT",                // Front Hand-off
+  "front_handoff": "FRONT",
+  "front_transfers": "FRNTRS",              // Front Transfers (plural)
+  "spanish_transfer": "SPA",                // Transferred To Spanish
+  "spanish": "SPA",
+  "customer_service": "TCR",                // Transferred To Customer Service
+
+  // Call Status and Requests
+  "voicemail": "A",                         // Answering Machine
   "answering_machine": "A",
   "machine": "A",
-  "callback": "CALLBK",
-  "call_back": "CALLBK",
+  "callback": "CB",                         // Requested Callback
+  "call_back": "CB",
   "requested_callback": "CB",
-  "not_interested": "NI",
-  "ni": "NI",
-  "interested": "INST",
-  "qualified_no_sale": "QNSALE",
-  "confused": "CC",
-  "confused_caller": "CC",
-
-  // Availability
-  "not_available": "NOTA",
-  "post_date": "POST",
-  "requested_form": "1095A",
+  "post_date": "POST",                      // Post Date
+  "requested_form": "1095A",                // Requested 10-95A Form
   "form_request": "1095A",
 
+  // Interest Levels
+  "not_interested": "NI",                   // Not Interested
+  "ni": "NI",
+  "not_available": "NOTA",                  // Not Available
+
   // Negative Outcomes
-  "bad_state": "BACA",
-  "cannot_afford": "CA",
-  "no_coverage": "NOTCOV",
-  "declined_sale": "PIKER",
+  "bad_state": "BACA",                      // Bad State/Cannot Sell
+  "cannot_sell": "BACA",
+  "cannot_afford": "CA",                    // Cannot Afford
+  "no_coverage": "NOTCOV",                  // Not Looking for Coverage
+  "declined_sale": "PIKER",                 // Declined Sale - PIKER
   "piker": "PIKER",
-  "wrong_number": "WRONG",
-  "bad_phone": "BPN",
+  "wrong_number": "WRONG",                  // Wrong Number
+  "bad_phone": "BPN",                       // Bad Phone Number
   "bad_phone_number": "BPN",
-  "disqualified": "MGMTNQ",
+  "disqualified": "MGMTNQ",                 // Disqualified Lead
+  "customer_disconnected": "CD",            // Customer Disconnected
 
   // Inquiries
-  "medicaid": "MCAID",
-  "medicare": "MCARE",
-  "medicare_tricare": "TRICAR",
-  "id_request": "REQID",
+  "medicaid": "MCAID",                      // Medicaid Inquiry
+  "medicare": "MCARE",                      // Medicare Inquiry
+  "medicare_tricare": "TRICAR",             // Medicare/Tricare
+  "id_request": "REQID",                    // Requested ID Card Number
 
-  // === SYSTEM CONTACT TYPES ===
-  "no_answer": "NOANSR",
-  "busy": "UB",
+  // ============================================================================
+  // SYSTEM CONTACT TYPES (44 codes)
+  // Technical/system outcomes - No human conversation occurred
+  // ============================================================================
+
+  // No Answer / Call Not Connected
+  "no_answer": "NA",                        // No Answer AutoDial
+  "no_answer_inbound": "NAIC",              // No Answer Inbound Call
+  "no_route": "NRA",                        // No Route Available
+  "new_lead": "NEW",                        // New Lead
+
+  // Busy / Hung Up
+  "busy": "B",                              // System Busy
   "system_busy": "B",
-  "hang_up": "HU",
-  "hangup": "HU",
-  "caller_hung_up": "CALLHU",
-  "customer_disconnected": "CD",
-  "disconnected": "CD",
-  "dead_air": "DEADAR",
-  "language_barrier": "LB",
-  "congestion": "CG",
-  "disconnected_number": "DC",
-  "do_not_call": "DNC",
-  "dnc": "DNC",
-  "agent_not_available": "DROP",
-  "agent_lost_connection": "ERI",
-  "call_done": "DONE",
-  "call_rejected": "REJ",
-  "operator_intercept": "OI",
-  "pbx_hung_up": "PBXHU",
-  "call_picked_up": "PU",
-  "incomplete": "INCOMP",
-  "new_lead": "NEW",
-  "failed": "N", // Dead Air/System Glitch
+  "caller_hung_up": "CALLHU",               // Caller Hung Up
+  "pbx_hung_up": "PBXHU",                   // Call ended at PBX
+  "answered_hung_up": "AH",                 // Answered & Hung-up
 
-  // Default fallback
-  "unknown": "UNKNWN",
+  // Disconnected / Network Issues
+  "disconnected_number": "DC",              // Disconnected Number
+  "disconnected": "DC",
+  "network_out_of_order": "NORD",           // Network Out Of Order
+
+  // Congestion
+  "congestion": "CG",                       // Congestion
+  "congestion_account_disconnected": "CGD", // Congestion Account Disconnected
+  "congestion_out_of_minutes": "CGO",       // Congestion Out of Minutes
+  "congested_temporarily": "CGT",           // Congested Temporarily
+
+  // DNC (Do Not Call)
+  "do_not_call": "DNC",                     // Do NOT Call
+  "dnc": "DNC",
+  "dnc_campaign_match": "DNCC",             // A match for Campaign DNC settings
+  "dnc_carrier_decline": "DNCDEC",          // DNC-Carrier Received Decline Request
+  "dnc_hopper_match": "DNCL",               // Do NOT Call Hopper Match
+  "dnc_lead_consent": "DNCLCC",             // Do NOT Call Lead Consent Concern
+  "dnc_not_found": "DNCNFD",                // DNC-Carrier Reports Number Not Found
+  "dnc_queue": "DNCQ",                      // Queue Set Call To DNC
+  "dnc_realtime": "DNCRT",                  // Do NOT Call Real Time Match
+  "dnc_wireless": "DNCW",                   // Do NOT Call Wireless Number
+
+  // Answering Machine Detected
+  "answering_machine_detected": "AA",       // Answering Machine Detected
+  "answering_machine_message": "AM",        // Answering Machine Detected Message Left
+  "queue_after_hours": "AHXFER",            // Queue After Hours Action Trigger
+
+  // Agent Issues
+  "agent_not_available": "DROP",            // Agent Not Available In Campaign
+  "agent_lost_connection": "ERI",           // Agent Lost Connection
+  "agent_force_logout": "LOGOUT",           // Agent Force Logout
+
+  // Call Handling
+  "call_done": "DONE",                      // Call Done
+  "call_rejected": "REJ",                   // Call Rejected
+  "call_picked_up": "PU",                   // Call Picked Up
+  "incomplete": "INCOMP",                   // Incomplete Call
+  "lead_in_call": "INCALL",                 // Lead In Call
+
+  // Detection Systems
+  "fas_detected": "FASD",                   // FAS Detected
+  "fax": "AFAX",                            // CPD Fax
+  "blocked_caller_id": "CIDB",              // Blocked Caller ID
+
+  // PBX / Queue Operations
+  "pbx_drop": "PXDROP",                     // Drop Call to PBX Application
+  "queue_drop": "QDROP",                    // Drop Call to Another Queue
+  "queue_drop_action": "WAITTO",            // Queue Drop Call Action Trigger
+  "queue_abandoned": "XDROP",               // Call Abandoned In Queue
+  "pre_routing_drop": "PDROP",              // Pre-Routing Drop
+
+  // System Errors
+  "dead_air": "N",                          // Dead Air/System Glitch
+  "failed": "N",
+  "operator_intercept": "OI",               // Operator Intercept
+  "improper_logout": "IMPL",                // Improper Logout
+  "forbidden": "FORBID",                    // Forbidden
 }
 
 /**
