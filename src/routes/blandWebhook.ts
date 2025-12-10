@@ -300,6 +300,8 @@ function determineOutcome(raw: any): CallOutcome {
     status: raw.status,
     error_message: raw.error_message,
     variables: raw.variables,
+    summary: raw.summary?.substring(0, 200),
+    pathway_tags: raw.pathway_tags,
   });
 
   // If there was a warm transfer, it was transferred
@@ -326,9 +328,9 @@ function determineOutcome(raw: any): CallOutcome {
     return CallOutcome.BUSY;
   }
 
-  // Check if call completed successfully with human
-  if (raw.completed && answeredBy === "human") {
-    // Check if there's a callback request in variables
+  // Check if call completed successfully - look at multiple indicators
+  if (raw.completed && raw.status === "completed") {
+    // Check for callback request first
     if (raw.variables?.callback_requested === true) {
       logger.info("🔍 OUTCOME | CALLBACK (callback_requested=true)", {
         call_id: callId,
@@ -336,13 +338,45 @@ function determineOutcome(raw: any): CallOutcome {
       });
       return CallOutcome.CALLBACK;
     }
-    // Default to transferred if completed with human
-    logger.info("🔍 OUTCOME | TRANSFERRED (completed with human, no callback)", {
-      call_id: callId,
-      answered_by: answeredBy,
-      completed: raw.completed,
-    });
-    return CallOutcome.TRANSFERRED;
+
+    // Check if qualification was completed (has age and plan_type)
+    const hasQualification = raw.variables?.customer_age && raw.variables?.plan_type;
+
+    // Check summary for transfer indicators
+    const summaryLower = raw.summary?.toLowerCase() || "";
+    const hasTransferInSummary = summaryLower.includes("transfer") ||
+                                  summaryLower.includes("licensed agent") ||
+                                  summaryLower.includes("connect");
+
+    // Check pathway tags for qualification success
+    const qualificationTags = ["Age Confirmation", "Plan Type", "Identity Confirmation"];
+    const hasQualificationTags = qualificationTags.some(tag =>
+      raw.pathway_tags?.some((pt: any) => pt === tag || pt?.name === tag)
+    );
+
+    if (hasQualification || hasTransferInSummary || hasQualificationTags) {
+      logger.info("🔍 OUTCOME | TRANSFERRED (call completed with qualification)", {
+        call_id: callId,
+        answered_by: answeredBy,
+        completed: raw.completed,
+        has_qualification: hasQualification,
+        has_transfer_in_summary: hasTransferInSummary,
+        has_qualification_tags: hasQualificationTags,
+        customer_age: raw.variables?.customer_age,
+        plan_type: raw.variables?.plan_type,
+      });
+      return CallOutcome.TRANSFERRED;
+    }
+
+    // If answered by human but no qualification, might be confused
+    if (answeredBy === "human") {
+      logger.info("🔍 OUTCOME | TRANSFERRED (completed with human, assumed successful)", {
+        call_id: callId,
+        answered_by: answeredBy,
+        completed: raw.completed,
+      });
+      return CallOutcome.TRANSFERRED;
+    }
   }
 
   // Check error status
@@ -361,7 +395,8 @@ function determineOutcome(raw: any): CallOutcome {
     answered_by: answeredBy,
     completed: raw.completed,
     status: raw.status,
-    note: "Unable to determine specific outcome",
+    has_qualification: !!(raw.variables?.customer_age && raw.variables?.plan_type),
+    note: "Unable to determine specific outcome - no clear success indicators",
   });
   return CallOutcome.CONFUSED;
 }

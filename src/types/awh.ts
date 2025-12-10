@@ -29,9 +29,24 @@ export interface ConvosoWebhookPayload {
 }
 
 /**
+ * Voicemail configuration for Bland API v1
+ * Based on: https://docs.bland.ai/api-v1/post/calls
+ */
+export interface BlandVoicemailConfig {
+  message: string;
+  action: "leave_message" | "hangup";
+  sensitive?: boolean;
+  sms?: {
+    to: string;
+    from: string;
+    message: string;
+  };
+}
+
+/**
  * Payload to send to Bland for outbound call
- * Based on Bland API: POST /v1/calls
- * Matching Zapier configuration
+ * Based on Bland API v1: POST /v1/calls
+ * Documentation: https://docs.bland.ai/api-v1/post/calls
  */
 export interface BlandOutboundCallRequest {
   phone_number: string;
@@ -48,8 +63,6 @@ export interface BlandOutboundCallRequest {
   // Voice and behavior
   voice?: string;
   max_duration?: number;
-  amd?: boolean; // Answering machine detection
-  answered_by_enabled?: boolean;
   wait_for_greeting?: boolean;
   block_interruptions?: boolean;
   record?: boolean;
@@ -59,10 +72,8 @@ export interface BlandOutboundCallRequest {
   // First sentence
   first_sentence?: string;
 
-  // Voicemail settings
-  voicemail_message?: string;
-  voicemail_action?: "leave_message" | "hangup";
-  sensitive_voicemail_detection?: boolean;
+  // Voicemail configuration (Bland API v1 format)
+  voicemail?: BlandVoicemailConfig;
 
   // Webhook URL - Bland will POST to this URL when call completes
   webhook?: string;

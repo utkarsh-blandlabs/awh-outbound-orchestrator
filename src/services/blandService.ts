@@ -85,7 +85,18 @@ class BlandService {
       voicemail_message: voicemailMessage,
     });
 
-    // Build request body matching Zapier configuration
+    // Build voicemail object following Bland API v1 format
+    const voicemailConfig = voicemailMessage
+      ? {
+          message: voicemailMessage,
+          action: (config.bland.voicemailAction || "leave_message") as
+            | "leave_message"
+            | "hangup",
+          sensitive: config.bland.sensitiveVoicemailDetection || true,
+        }
+      : undefined;
+
+    // Build request body matching Bland API v1 specification
     const requestBody: BlandOutboundCallRequest = {
       phone_number: payload.phoneNumber,
 
@@ -108,8 +119,6 @@ class BlandService {
       // Voice and behavior
       ...(config.bland.voiceId && { voice: config.bland.voiceId }),
       max_duration: config.bland.maxDuration,
-      amd: config.bland.answeringMachineDetection,
-      answered_by_enabled: config.bland.answeredByEnabled,
       wait_for_greeting: config.bland.waitForGreeting,
       block_interruptions: config.bland.blockInterruptions,
       record: config.bland.record,
@@ -117,14 +126,8 @@ class BlandService {
       // First sentence (with template variables for Bland to replace)
       ...(firstSentence && { first_sentence: firstSentence }),
 
-      // Voicemail settings (pre-personalized since Bland can't access request_data in voicemail)
-      voicemail_message: voicemailMessage,
-      ...(config.bland.voicemailAction && {
-        voicemail_action: config.bland.voicemailAction as
-          | "leave_message"
-          | "hangup",
-      }),
-      sensitive_voicemail_detection: config.bland.sensitiveVoicemailDetection,
+      // Voicemail configuration (Bland API v1 format)
+      ...(voicemailConfig && { voicemail: voicemailConfig }),
 
       // Webhook URL - Bland will POST to this URL when call completes
       ...(config.bland.webhookUrl && { webhook: config.bland.webhookUrl }),
@@ -144,13 +147,10 @@ class BlandService {
       transfer_phone_number: requestBody.transfer_phone_number,
       voice: requestBody.voice,
       max_duration: requestBody.max_duration,
-      amd: requestBody.amd,
-      answered_by_enabled: requestBody.answered_by_enabled,
       wait_for_greeting: requestBody.wait_for_greeting,
       block_interruptions: requestBody.block_interruptions,
       record: requestBody.record,
-      sensitive_voicemail_detection: requestBody.sensitive_voicemail_detection,
-      voicemail_action: requestBody.voicemail_action,
+      voicemail: requestBody.voicemail,
       webhook: requestBody.webhook,
       wait: requestBody.wait,
     });
@@ -163,7 +163,7 @@ class BlandService {
       task_length: requestBody.task?.length,
       task_preview: requestBody.task?.substring(0, 200),
       first_sentence: requestBody.first_sentence,
-      voicemail_message: requestBody.voicemail_message,
+      voicemail_config: requestBody.voicemail,
     });
 
     try {
