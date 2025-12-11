@@ -177,6 +177,7 @@ async function processCallback(payload: CallbackPayload, requestId: string): Pro
       callId,
       requestId,
       payload.lead_id,
+      payload.list_id || "",
       payload.phone_number,
       payload.first_name,
       payload.last_name

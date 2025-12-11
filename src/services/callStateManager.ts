@@ -5,6 +5,7 @@ interface PendingCall {
   call_id: string;
   request_id: string;
   lead_id: string;
+  list_id: string;
   phone_number: string;
   first_name: string;
   last_name: string;
@@ -20,6 +21,7 @@ class CallStateManagerClass {
     callId: string,
     requestId: string,
     leadId: string,
+    listId: string,
     phoneNumber: string,
     firstName: string,
     lastName: string
@@ -28,6 +30,7 @@ class CallStateManagerClass {
       call_id: callId,
       request_id: requestId,
       lead_id: leadId,
+      list_id: listId,
       phone_number: phoneNumber,
       first_name: firstName,
       last_name: lastName,
@@ -40,6 +43,7 @@ class CallStateManagerClass {
     logger.info("Added pending call", {
       call_id: callId,
       lead_id: leadId,
+      list_id: listId,
       pending_count: this.pendingCalls.size,
     });
   }

@@ -2,6 +2,7 @@ import { Router, Request, Response } from "express";
 import { logger } from "../utils/logger";
 import { CallStateManager } from "../services/callStateManager";
 import { convosoService } from "../services/convosoService";
+import { statisticsService } from "../services/statisticsService";
 import { BlandTranscript, CallOutcome } from "../types/awh";
 
 const router = Router();
@@ -95,6 +96,7 @@ async function processCallCompletion(
 
     await convosoService.updateCallLog(
       callState.lead_id,
+      callState.list_id,
       callState.phone_number,
       transcript
     );
@@ -104,6 +106,12 @@ async function processCallCompletion(
       lead_id: callState.lead_id,
     });
 
+    // Record statistics
+    statisticsService.recordCallComplete(
+      transcript.outcome,
+      transcript.answered_by
+    );
+
     CallStateManager.completeCall(callState.call_id);
   } catch (error: any) {
     logger.error("Convoso update failed", {
@@ -111,6 +119,9 @@ async function processCallCompletion(
       lead_id: callState.lead_id,
       error: error.message,
     });
+
+    // Record failure statistics
+    statisticsService.recordCallFailure(error.message);
 
     CallStateManager.failCall(callState.call_id, error.message);
     throw error;

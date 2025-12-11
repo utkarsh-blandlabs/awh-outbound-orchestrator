@@ -64,7 +64,6 @@ export const config = {
   convoso: {
     authToken: process.env["CONVOSO_AUTH_TOKEN"] || "",
     baseUrl: process.env["CONVOSO_BASE_URL"] || "https://api.convoso.com",
-    listId: process.env["CONVOSO_LIST_ID"] || "16529",
   },
 
   // Retry config
@@ -132,5 +131,4 @@ export function printConfig(): void {
   console.log(`   BLAND_PATHWAY_ID: ${config.bland.pathwayId ? "✓" : "✗"}`);
   console.log(`   CONVOSO_BASE_URL: ${config.convoso.baseUrl}`);
   console.log(`   CONVOSO_AUTH_TOKEN: ${config.convoso.authToken ? "✓" : "✗"}`);
-  console.log(`   CONVOSO_LIST_ID: ${config.convoso.listId}`);
 }

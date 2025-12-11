@@ -37,6 +37,9 @@ coverage/
 .cache/
 *.tsbuildinfo
 
+# Data files (statistics)
+data/
+
 # Deployment
 *.tar.gz
 backups/

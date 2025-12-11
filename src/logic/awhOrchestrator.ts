@@ -55,6 +55,7 @@ export async function handleAwhOutbound(
       callResponse.call_id,
       requestId || "",
       payload.lead_id,
+      payload.list_id,
       payload.phone_number,
       payload.first_name,
       payload.last_name

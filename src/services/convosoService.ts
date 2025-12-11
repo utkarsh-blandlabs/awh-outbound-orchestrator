@@ -50,6 +50,7 @@ class ConvosoService {
 
   async updateCallLog(
     leadId: string,
+    listId: string,
     phoneNumber: string,
     transcript: BlandTranscript
   ): Promise<void> {
@@ -59,6 +60,7 @@ class ConvosoService {
 
     logger.info("Updating Convoso lead", {
       lead_id: leadId,
+      list_id: listId,
       phone: convosoPhone,
       outcome: transcript.outcome,
       status: convosoStatus,
@@ -68,18 +70,28 @@ class ConvosoService {
     const requestData: any = {
       auth_token: config.convoso.authToken,
       lead_id: leadId,
+      list_id: listId,
       call_transcript: callTranscript,
       status: convosoStatus,
     };
 
+    // Add all available data from transcript
     if (transcript.plan_type) requestData.plan_type = transcript.plan_type;
     if (transcript.member_count) requestData.member_count = transcript.member_count;
     if (transcript.zip) requestData.postal_code = transcript.zip;
     if (transcript.state) requestData.state = transcript.state;
+    if (transcript.customer_state) requestData.state = transcript.customer_state;
     if (transcript.duration) requestData.call_duration = transcript.duration;
     if (transcript.answered_by) requestData.answered_by = transcript.answered_by;
+    if (transcript.customer_age) requestData.age = transcript.customer_age;
+    if (transcript.postal_code) requestData.postal_code = transcript.postal_code;
+    if (transcript.first_name) requestData.first_name = transcript.first_name;
+    if (transcript.last_name) requestData.last_name = transcript.last_name;
+    if (transcript.summary) requestData.call_summary = transcript.summary;
+    if (transcript.call_ended_by) requestData.call_ended_by = transcript.call_ended_by;
+    if (transcript.transferred_to) requestData.transferred_to = transcript.transferred_to;
+    if (transcript.recording_url) requestData.recording_url = transcript.recording_url;
     if (convosoPhone) requestData.phone_number = convosoPhone;
-    if (config.convoso.listId) requestData.list_id = config.convoso.listId;
 
     try {
       const response = await retry(

@@ -6,6 +6,7 @@
 import { Router, Request, Response } from "express";
 import { CallStateManager } from "../services/callStateManager";
 import { blandRateLimiter } from "../utils/rateLimiter";
+import { statisticsService } from "../services/statisticsService";
 import { logger } from "../utils/logger";
 
 const router = Router();
@@ -287,6 +288,140 @@ router.get("/health", (req: Request, res: Response) => {
     });
   } catch (error: any) {
     logger.error("Error checking health", { error: error.message });
+    res.status(500).json({
+      success: false,
+      error: error.message,
+    });
+  }
+});
+
+/**
+ * GET /api/admin/statistics/today
+ * Returns statistics for today
+ */
+router.get("/statistics/today", (req: Request, res: Response) => {
+  try {
+    const stats = statisticsService.getTodayStats();
+
+    res.json({
+      success: true,
+      timestamp: new Date().toISOString(),
+      statistics: stats,
+    });
+  } catch (error: any) {
+    logger.error("Error fetching today's statistics", { error: error.message });
+    res.status(500).json({
+      success: false,
+      error: error.message,
+    });
+  }
+});
+
+/**
+ * GET /api/admin/statistics/date/:date
+ * Returns statistics for a specific date (YYYY-MM-DD)
+ */
+router.get("/statistics/date/:date", (req: Request, res: Response) => {
+  try {
+    const date = req.params["date"];
+
+    if (!date) {
+      return res.status(400).json({
+        success: false,
+        error: "Missing date parameter",
+      });
+    }
+
+    // Validate date format
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) {
+      return res.status(400).json({
+        success: false,
+        error: "Invalid date format. Use YYYY-MM-DD",
+      });
+    }
+
+    const stats = statisticsService.getStatsByDate(date);
+
+    res.json({
+      success: true,
+      timestamp: new Date().toISOString(),
+      date,
+      statistics: stats,
+    });
+  } catch (error: any) {
+    logger.error("Error fetching statistics for date", {
+      date: req.params["date"],
+      error: error.message
+    });
+    res.status(500).json({
+      success: false,
+      error: error.message,
+    });
+  }
+});
+
+/**
+ * GET /api/admin/statistics/range?start_date=YYYY-MM-DD&end_date=YYYY-MM-DD
+ * Returns statistics for a date range
+ */
+router.get("/statistics/range", (req: Request, res: Response) => {
+  try {
+    const startDate = req.query["start_date"] as string;
+    const endDate = req.query["end_date"] as string;
+
+    if (!startDate || !endDate) {
+      return res.status(400).json({
+        success: false,
+        error: "Missing required parameters: start_date and end_date",
+      });
+    }
+
+    // Validate date formats
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(startDate) || !/^\d{4}-\d{2}-\d{2}$/.test(endDate)) {
+      return res.status(400).json({
+        success: false,
+        error: "Invalid date format. Use YYYY-MM-DD",
+      });
+    }
+
+    const stats = statisticsService.getStatsByDateRange(startDate, endDate);
+
+    res.json({
+      success: true,
+      timestamp: new Date().toISOString(),
+      start_date: startDate,
+      end_date: endDate,
+      days: stats.length,
+      statistics: stats,
+    });
+  } catch (error: any) {
+    logger.error("Error fetching statistics for range", {
+      start_date: req.query["start_date"],
+      end_date: req.query["end_date"],
+      error: error.message
+    });
+    res.status(500).json({
+      success: false,
+      error: error.message,
+    });
+  }
+});
+
+/**
+ * GET /api/admin/statistics/all-time
+ * Returns aggregated statistics across all dates
+ */
+router.get("/statistics/all-time", (req: Request, res: Response) => {
+  try {
+    const stats = statisticsService.getAllTimeStats();
+
+    res.json({
+      success: true,
+      timestamp: new Date().toISOString(),
+      statistics: stats,
+    });
+  } catch (error: any) {
+    logger.error("Error fetching all-time statistics", { error: error.message });
     res.status(500).json({
       success: false,
       error: error.message,
