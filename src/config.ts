@@ -31,7 +31,8 @@ export const config = {
     maxDuration: parseInt(process.env["BLAND_MAX_DURATION"] || "30"),
 
     // Call behavior
-    answeringMachineDetection: process.env["BLAND_ANSWERING_MACHINE_DETECTION"] === "true",
+    answeringMachineDetection:
+      process.env["BLAND_ANSWERING_MACHINE_DETECTION"] === "true",
     waitForGreeting: process.env["BLAND_WAIT_FOR_GREETING"] === "true",
     blockInterruptions: process.env["BLAND_BLOCK_INTERRUPTIONS"] === "true",
     record: process.env["BLAND_RECORD"] === "true",
@@ -40,7 +41,8 @@ export const config = {
     voicemailMessage: process.env["BLAND_VOICEMAIL_MESSAGE"] || "",
     voicemailAction: process.env["BLAND_VOICEMAIL_ACTION"] || "leave_message",
     answeredByEnabled: process.env["BLAND_ANSWERED_BY_ENABLED"] === "true",
-    sensitiveVoicemailDetection: process.env["BLAND_SENSITIVE_VOICEMAIL_DETECTION"] === "true",
+    sensitiveVoicemailDetection:
+      process.env["BLAND_SENSITIVE_VOICEMAIL_DETECTION"] === "true",
 
     // Dynamic templates
     taskTemplate: process.env["BLAND_TASK_TEMPLATE"] || "",
@@ -63,7 +65,6 @@ export const config = {
     authToken: process.env["CONVOSO_AUTH_TOKEN"] || "",
     baseUrl: process.env["CONVOSO_BASE_URL"] || "https://api.convoso.com",
     listId: process.env["CONVOSO_LIST_ID"] || "16529",
-    adaptorId: process.env["CONVOSO_ADAPTOR_ID"] || "",
   },
 
   // Retry config
@@ -76,18 +77,28 @@ export const config = {
   // Rate limiter config
   rateLimiter: {
     enabled: process.env["RATE_LIMITER_ENABLED"] !== "false", // Enabled by default
-    maxCallsPerSecond: parseFloat(process.env["RATE_LIMITER_MAX_CALLS_PER_SECOND"] || "5"),
-    sameNumberIntervalMs: parseInt(process.env["RATE_LIMITER_SAME_NUMBER_INTERVAL_MS"] || "10000"),
+    maxCallsPerSecond: parseFloat(
+      process.env["RATE_LIMITER_MAX_CALLS_PER_SECOND"] || "5"
+    ),
+    sameNumberIntervalMs: parseInt(
+      process.env["RATE_LIMITER_SAME_NUMBER_INTERVAL_MS"] || "10000"
+    ),
   },
 
   // Cache retention config
   cache: {
     // How long to keep completed/failed calls in cache (for admin dashboard)
-    completedRetentionMinutes: parseInt(process.env["CACHE_COMPLETED_RETENTION_MINUTES"] || "90"),
+    completedRetentionMinutes: parseInt(
+      process.env["CACHE_COMPLETED_RETENTION_MINUTES"] || "90"
+    ),
     // How long to keep pending calls before marking as stale (no webhook received)
-    pendingMaxAgeMinutes: parseInt(process.env["CACHE_PENDING_MAX_AGE_MINUTES"] || "90"),
+    pendingMaxAgeMinutes: parseInt(
+      process.env["CACHE_PENDING_MAX_AGE_MINUTES"] || "90"
+    ),
     // How often to run cleanup of stale calls
-    cleanupIntervalMinutes: parseInt(process.env["CACHE_CLEANUP_INTERVAL_MINUTES"] || "10"),
+    cleanupIntervalMinutes: parseInt(
+      process.env["CACHE_CLEANUP_INTERVAL_MINUTES"] || "10"
+    ),
   },
 
   // Logging
