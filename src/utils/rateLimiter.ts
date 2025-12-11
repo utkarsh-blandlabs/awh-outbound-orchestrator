@@ -6,9 +6,17 @@
  * 2. Per-number limit: Cannot call same number within 10 seconds
  *
  * This prevents hitting Bland AI's 429 rate limit errors in production
+ *
+ * Can be controlled via environment variables:
+ * - RATE_LIMITER_ENABLED=true/false
+ * - RATE_LIMITER_MAX_CALLS_PER_SECOND=5
+ * - RATE_LIMITER_SAME_NUMBER_INTERVAL_MS=10000
  */
 
+import { config } from "../config";
+
 interface RateLimitConfig {
+  enabled: boolean; // Enable/disable rate limiting
   maxCallsPerSecond: number; // Global limit
   sameNumberIntervalMs: number; // Per-number limit
 }
@@ -31,6 +39,7 @@ class BlandRateLimiter {
 
   constructor(config?: Partial<RateLimitConfig>) {
     this.config = {
+      enabled: true, // Enabled by default
       maxCallsPerSecond: 5, // Conservative: Enterprise allows 5.5
       sameNumberIntervalMs: 10000, // 10 seconds
       ...config,
@@ -40,6 +49,32 @@ class BlandRateLimiter {
     this.recentCalls = [];
     this.waitQueue = [];
     this.processingQueue = false;
+
+    // Periodic cleanup to prevent memory leaks
+    setInterval(() => {
+      this.cleanup();
+    }, 60000); // Cleanup every 60 seconds
+  }
+
+  /**
+   * Clean up old entries to prevent memory leaks
+   */
+  private cleanup(): void {
+    const now = Date.now();
+
+    // Remove phone numbers not called in last 10 minutes
+    const tenMinutesAgo = now - 10 * 60 * 1000;
+    for (const [phoneNumber, timestamp] of this.lastCallByNumber.entries()) {
+      if (timestamp < tenMinutesAgo) {
+        this.lastCallByNumber.delete(phoneNumber);
+      }
+    }
+
+    // Remove calls older than 5 seconds from recentCalls
+    const fiveSecondsAgo = now - 5000;
+    this.recentCalls = this.recentCalls.filter(
+      (call) => call.timestamp > fiveSecondsAgo
+    );
   }
 
   /**
@@ -47,6 +82,11 @@ class BlandRateLimiter {
    * Returns a promise that resolves when the call can proceed
    */
   async waitForSlot(phoneNumber: string): Promise<void> {
+    // If rate limiting is disabled, skip all checks
+    if (!this.config.enabled) {
+      return;
+    }
+
     const now = Date.now();
 
     // Check per-number limit
@@ -210,10 +250,11 @@ class BlandRateLimiter {
   }
 }
 
-// Export singleton instance
+// Export singleton instance with config from environment
 export const blandRateLimiter = new BlandRateLimiter({
-  maxCallsPerSecond: 5, // Enterprise allows 5.5, we use 5 to be safe
-  sameNumberIntervalMs: 10000, // 10 seconds per Bland AI docs
+  enabled: config.rateLimiter.enabled,
+  maxCallsPerSecond: config.rateLimiter.maxCallsPerSecond,
+  sameNumberIntervalMs: config.rateLimiter.sameNumberIntervalMs,
 });
 
 export { BlandRateLimiter };

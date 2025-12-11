@@ -62,7 +62,8 @@ export const config = {
   convoso: {
     authToken: process.env["CONVOSO_AUTH_TOKEN"] || "",
     baseUrl: process.env["CONVOSO_BASE_URL"] || "https://api.convoso.com",
-    listId: process.env["CONVOSO_LIST_ID"] || "16529", // Default list from Jeff's example
+    listId: process.env["CONVOSO_LIST_ID"] || "16529",
+    adaptorId: process.env["CONVOSO_ADAPTOR_ID"] || "",
   },
 
   // Retry config
@@ -70,6 +71,23 @@ export const config = {
     maxAttempts: parseInt(process.env["RETRY_MAX_ATTEMPTS"] || "3"),
     initialDelay: parseInt(process.env["RETRY_INITIAL_DELAY"] || "1000"), // 1 second
     maxDelay: parseInt(process.env["RETRY_MAX_DELAY"] || "10000"), // 10 seconds
+  },
+
+  // Rate limiter config
+  rateLimiter: {
+    enabled: process.env["RATE_LIMITER_ENABLED"] !== "false", // Enabled by default
+    maxCallsPerSecond: parseFloat(process.env["RATE_LIMITER_MAX_CALLS_PER_SECOND"] || "5"),
+    sameNumberIntervalMs: parseInt(process.env["RATE_LIMITER_SAME_NUMBER_INTERVAL_MS"] || "10000"),
+  },
+
+  // Cache retention config
+  cache: {
+    // How long to keep completed/failed calls in cache (for admin dashboard)
+    completedRetentionMinutes: parseInt(process.env["CACHE_COMPLETED_RETENTION_MINUTES"] || "90"),
+    // How long to keep pending calls before marking as stale (no webhook received)
+    pendingMaxAgeMinutes: parseInt(process.env["CACHE_PENDING_MAX_AGE_MINUTES"] || "90"),
+    // How often to run cleanup of stale calls
+    cleanupIntervalMinutes: parseInt(process.env["CACHE_CLEANUP_INTERVAL_MINUTES"] || "10"),
   },
 
   // Logging

@@ -24,6 +24,10 @@ export interface ConvosoWebhookPayload {
   date_of_birth?: string;
   age?: string;
 
+  // Call log ID - sent by Convoso when they initiate the call
+  // IMPORTANT: Required for updating call transcripts via /v1/log/update
+  call_log_id?: string;
+
   // Allow additional fields
   [key: string]: any;
 }
@@ -341,12 +345,22 @@ export interface ConvosoLeadInsertRequest {
 /**
  * Request to log/update call in Convoso
  * Based on /v1/log/update endpoint
+ *
+ * IMPORTANT: According to Convoso support (Josh), required params are:
+ * - auth_token
+ * - call_log_id (NOT lead_id or phone_number!)
+ *
+ * This endpoint allows appending:
+ * - call_transcript (appears in "Call Transcript" column)
+ * - extra_field_01
+ * - extra_field_02
  */
 export interface ConvosoCallLogRequest {
   auth_token: string;
-  phone_number: string;
-  lead_id: string;
-  call_transcript?: string;
+  call_log_id: string;  // REQUIRED: Convoso's internal call log ID
+  call_transcript?: string;  // Appears in "Call Transcript" column in Convoso
+  extra_field_01?: string;  // Can be used for additional data
+  extra_field_02?: string;  // Can be used for metadata
   [key: string]: any;
 }
 

@@ -19,8 +19,11 @@ function authenticateAdmin(req: Request, res: Response, next: Function) {
 
   // Check API key (set in environment variables)
   if (!process.env["ADMIN_API_KEY"]) {
-    logger.warn("ADMIN_API_KEY not set, allowing unauthenticated access");
-    return next();
+    logger.error("ADMIN_API_KEY not set, blocking admin access");
+    return res.status(500).json({
+      success: false,
+      error: "Admin API not configured properly",
+    });
   }
 
   if (apiKey !== process.env["ADMIN_API_KEY"]) {

@@ -77,13 +77,6 @@ class BlandService {
           .replace(/\{\{last_name\}\}/g, payload.lastName)
       : "";
 
-    // Log what we're sending
-    logger.debug("🎭 Call Configuration", {
-      request_data: requestData,
-      task_template: task?.substring(0, 100) + "...",
-      first_sentence_template: firstSentence,
-      voicemail_message: voicemailMessage,
-    });
 
     // Build voicemail object following Bland API v1 format
     const voicemailConfig = voicemailMessage
@@ -136,35 +129,6 @@ class BlandService {
       wait: false, // Don't wait for call to complete (async)
     };
 
-    // Log the FULL request body being sent to Bland (for debugging)
-    logger.info("📤 BLAND REQUEST | Full API request being sent", {
-      endpoint: "/v1/calls",
-      method: "POST",
-      phone_number: requestBody.phone_number,
-      pathway_id: requestBody.pathway_id,
-      start_node_id: requestBody.start_node_id,
-      from: requestBody.from,
-      transfer_phone_number: requestBody.transfer_phone_number,
-      voice: requestBody.voice,
-      max_duration: requestBody.max_duration,
-      wait_for_greeting: requestBody.wait_for_greeting,
-      block_interruptions: requestBody.block_interruptions,
-      record: requestBody.record,
-      voicemail: requestBody.voicemail,
-      webhook: requestBody.webhook,
-      wait: requestBody.wait,
-    });
-
-    logger.info("📤 BLAND REQUEST | Request data being passed", {
-      request_data: requestBody.request_data,
-    });
-
-    logger.info("📤 BLAND REQUEST | Templates with placeholders", {
-      task_length: requestBody.task?.length,
-      task_preview: requestBody.task?.substring(0, 200),
-      first_sentence: requestBody.first_sentence,
-      voicemail_config: requestBody.voicemail,
-    });
 
     try {
       const response = await retry(
@@ -178,13 +142,6 @@ class BlandService {
           shouldRetry: isRetryableHttpError,
         }
       );
-
-      // Log FULL Bland call initiation response
-      logger.info("📥 BLAND RESPONSE | Call initiation response received", {
-        call_id: response.call_id,
-        status: response.status,
-        full_response: JSON.stringify(response, null, 2),
-      });
 
       logger.info("Bland call initiated successfully", {
         call_id: response.call_id,
@@ -245,11 +202,6 @@ class BlandService {
           (response.status === "completed" && hasTranscript);
 
         if (isCompleted) {
-          // Log full raw response from Bland
-          logger.debug("📝 Bland API - Full Transcript Response (RAW)", {
-            full_response: response,
-          });
-
           const parsedTranscript = this.parseTranscript(response);
 
           logger.info("Transcript retrieved successfully", {

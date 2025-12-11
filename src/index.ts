@@ -96,37 +96,31 @@ const PORT = config.port;
 
 const server = app.listen(PORT, () => {
   console.log("");
-  console.log("🚀 ============================================");
-  console.log("🚀  AWH Outbound Orchestrator");
-  console.log("🚀 ============================================");
-  console.log(`🚀  Server running on port ${PORT}`);
-  console.log(`🚀  Environment: ${config.nodeEnv}`);
-  console.log("🚀 ============================================");
+  console.log("===========================================");
+  console.log("  AWH Outbound Orchestrator");
+  console.log("===========================================");
+  console.log(`  Server running on port ${PORT}`);
+  console.log(`  Environment: ${config.nodeEnv}`);
+  console.log("===========================================");
   console.log("");
 
   printConfig();
 
   console.log("");
-  console.log("📡 Available endpoints:");
-  console.log(`   GET  http://localhost:${PORT}/health`);
-  console.log(`   POST http://localhost:${PORT}/webhooks/awhealth-outbound (from Convoso)`);
-  console.log(`   POST http://localhost:${PORT}/webhooks/bland-callback (from Bland AI)`);
-  console.log(`   POST http://localhost:${PORT}/webhooks/call-back (Zapier replacement)`);
+  console.log("Available endpoints:");
+  console.log(`  GET  http://localhost:${PORT}/health`);
+  console.log(`  POST http://localhost:${PORT}/webhooks/awhealth-outbound`);
+  console.log(`  POST http://localhost:${PORT}/webhooks/bland-callback`);
+  console.log(`  POST http://localhost:${PORT}/webhooks/call-back`);
   console.log("");
-  console.log("🔧 Admin API endpoints:");
-  console.log(`   GET  http://localhost:${PORT}/api/admin/calls/active`);
-  console.log(`   GET  http://localhost:${PORT}/api/admin/calls/stats`);
-  console.log(`   GET  http://localhost:${PORT}/api/admin/calls/:call_id`);
-  console.log(`   GET  http://localhost:${PORT}/api/admin/health`);
-  console.log(`   POST http://localhost:${PORT}/api/admin/cache/clear`);
+  console.log("Admin API endpoints:");
+  console.log(`  GET  http://localhost:${PORT}/api/admin/calls/active`);
+  console.log(`  GET  http://localhost:${PORT}/api/admin/calls/stats`);
+  console.log(`  GET  http://localhost:${PORT}/api/admin/calls/:call_id`);
+  console.log(`  GET  http://localhost:${PORT}/api/admin/health`);
+  console.log(`  POST http://localhost:${PORT}/api/admin/cache/clear`);
   console.log("");
-  console.log("⚡ Architecture: WEBHOOK-BASED (no polling!)");
-  console.log("   - Convoso webhook triggers call initiation");
-  console.log("   - Bland webhook notifies when call completes");
-  console.log("   - Results updated to Convoso automatically");
-  console.log("   - Scalable to 100+ concurrent calls");
-  console.log("");
-  console.log("✅ Ready to receive webhooks!");
+  console.log("Ready to receive webhooks");
   console.log("");
 });
 
