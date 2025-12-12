@@ -7,6 +7,7 @@ import { Router, Request, Response } from "express";
 import { CallStateManager } from "../services/callStateManager";
 import { blandRateLimiter } from "../utils/rateLimiter";
 import { statisticsService } from "../services/statisticsService";
+import { schedulerService } from "../services/schedulerService";
 import { logger } from "../utils/logger";
 
 const router = Router();
@@ -422,6 +423,193 @@ router.get("/statistics/all-time", (req: Request, res: Response) => {
     });
   } catch (error: any) {
     logger.error("Error fetching all-time statistics", { error: error.message });
+    res.status(500).json({
+      success: false,
+      error: error.message,
+    });
+  }
+});
+
+/**
+ * GET /api/admin/scheduler/config
+ * Get current scheduler configuration
+ */
+router.get("/scheduler/config", (req: Request, res: Response) => {
+  try {
+    const config = schedulerService.getConfig();
+    const isActive = schedulerService.isActive();
+    const queueStats = schedulerService.getQueueStats();
+
+    res.json({
+      success: true,
+      timestamp: new Date().toISOString(),
+      config,
+      status: {
+        is_active: isActive,
+        callbacks_enabled: schedulerService.areCallbacksEnabled(),
+      },
+      queue: queueStats,
+    });
+  } catch (error: any) {
+    logger.error("Error fetching scheduler config", { error: error.message });
+    res.status(500).json({
+      success: false,
+      error: error.message,
+    });
+  }
+});
+
+/**
+ * PUT /api/admin/scheduler/config
+ * Update scheduler configuration
+ * Body: {
+ *   enabled?: boolean,
+ *   callbacksEnabled?: boolean,
+ *   timezone?: string,
+ *   schedule?: { days?: number[], startTime?: string, endTime?: string }
+ * }
+ */
+router.put("/scheduler/config", (req: Request, res: Response) => {
+  try {
+    const updates = req.body;
+
+    // Validate timezone if provided
+    if (updates.timezone) {
+      try {
+        new Intl.DateTimeFormat("en-US", { timeZone: updates.timezone });
+      } catch (e) {
+        return res.status(400).json({
+          success: false,
+          error: "Invalid timezone",
+        });
+      }
+    }
+
+    // Validate time format if provided
+    const timeRegex = /^([0-1][0-9]|2[0-3]):[0-5][0-9]$/;
+    if (updates.schedule?.startTime && !timeRegex.test(updates.schedule.startTime)) {
+      return res.status(400).json({
+        success: false,
+        error: "Invalid startTime format. Use HH:MM (24-hour)",
+      });
+    }
+    if (updates.schedule?.endTime && !timeRegex.test(updates.schedule.endTime)) {
+      return res.status(400).json({
+        success: false,
+        error: "Invalid endTime format. Use HH:MM (24-hour)",
+      });
+    }
+
+    // Validate days array if provided
+    if (updates.schedule?.days) {
+      if (!Array.isArray(updates.schedule.days)) {
+        return res.status(400).json({
+          success: false,
+          error: "days must be an array",
+        });
+      }
+      const validDays = updates.schedule.days.every(
+        (d: any) => typeof d === "number" && d >= 0 && d <= 6
+      );
+      if (!validDays) {
+        return res.status(400).json({
+          success: false,
+          error: "days must be array of numbers 0-6 (0=Sunday, 6=Saturday)",
+        });
+      }
+    }
+
+    const newConfig = schedulerService.updateConfig(updates);
+
+    logger.info("Scheduler config updated via API", {
+      updates,
+      triggered_by: (req.headers["x-user"] as string) || "unknown",
+    });
+
+    res.json({
+      success: true,
+      message: "Scheduler configuration updated",
+      config: newConfig,
+      is_active: schedulerService.isActive(),
+    });
+  } catch (error: any) {
+    logger.error("Error updating scheduler config", { error: error.message });
+    res.status(500).json({
+      success: false,
+      error: error.message,
+    });
+  }
+});
+
+/**
+ * GET /api/admin/scheduler/queue
+ * Get queued requests
+ */
+router.get("/scheduler/queue", (req: Request, res: Response) => {
+  try {
+    const queue = schedulerService.getQueue();
+    const stats = schedulerService.getQueueStats();
+
+    res.json({
+      success: true,
+      timestamp: new Date().toISOString(),
+      stats,
+      queue,
+    });
+  } catch (error: any) {
+    logger.error("Error fetching queue", { error: error.message });
+    res.status(500).json({
+      success: false,
+      error: error.message,
+    });
+  }
+});
+
+/**
+ * POST /api/admin/scheduler/queue/process
+ * Manually process queued requests
+ */
+router.post("/scheduler/queue/process", async (req: Request, res: Response) => {
+  try {
+    await schedulerService.processQueue();
+
+    logger.info("Queue processed via API", {
+      triggered_by: (req.headers["x-user"] as string) || "unknown",
+    });
+
+    res.json({
+      success: true,
+      message: "Queue processed successfully",
+    });
+  } catch (error: any) {
+    logger.error("Error processing queue", { error: error.message });
+    res.status(500).json({
+      success: false,
+      error: error.message,
+    });
+  }
+});
+
+/**
+ * DELETE /api/admin/scheduler/queue
+ * Clear all queued requests
+ */
+router.delete("/scheduler/queue", (req: Request, res: Response) => {
+  try {
+    const cleared = schedulerService.clearQueue();
+
+    logger.info("Queue cleared via API", {
+      cleared,
+      triggered_by: (req.headers["x-user"] as string) || "unknown",
+    });
+
+    res.json({
+      success: true,
+      message: "Queue cleared successfully",
+      cleared,
+    });
+  } catch (error: any) {
+    logger.error("Error clearing queue", { error: error.message });
     res.status(500).json({
       success: false,
       error: error.message,

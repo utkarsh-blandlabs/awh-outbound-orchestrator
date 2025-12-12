@@ -15,10 +15,16 @@ router.post("/bland-callback", async (req: Request, res: Response) => {
     requestId,
     call_id: callId,
     status: req.body.status,
+    answered_by: req.body.answered_by,
+    to: req.body.to,
   });
 
   try {
     if (!callId) {
+      logger.error("Missing call_id in webhook payload", {
+        requestId,
+        payload_keys: Object.keys(req.body),
+      });
       throw new Error("Missing call_id in webhook payload");
     }
 
@@ -29,29 +35,38 @@ router.post("/bland-callback", async (req: Request, res: Response) => {
       call_id: callId,
       outcome: transcript.outcome,
       duration: transcript.duration,
+      answered_by: transcript.answered_by,
     });
 
     const callState = CallStateManager.getPendingCall(callId);
 
     if (!callState) {
-      logger.warn("No pending call found", {
+      logger.warn("No pending call found in cache", {
+        requestId,
+        call_id: callId,
+        to: req.body.to,
+        answered_by: req.body.answered_by,
+        status: req.body.status,
+        note: "Call may have completed before server restart, or webhook arrived late",
+      });
+
+      // Still return 200 OK to Bland so they don't retry
+      return res.status(200).json({
+        success: true,
+        message: "Webhook received (no pending call found - may be after server restart)",
         requestId,
         call_id: callId,
       });
-
-      return res.status(200).json({
-        success: true,
-        message: "Webhook received (no pending call found)",
-        requestId,
-      });
     }
 
+    // Process asynchronously - don't block webhook response
     processCallCompletion(callState, transcript, requestId)
       .then(() => {
         logger.info("Call processing completed", {
           requestId,
           call_id: callId,
           lead_id: callState.lead_id,
+          phone: callState.phone_number,
         });
       })
       .catch((error) => {
@@ -59,25 +74,33 @@ router.post("/bland-callback", async (req: Request, res: Response) => {
           requestId,
           call_id: callId,
           lead_id: callState.lead_id,
+          phone: callState.phone_number,
           error: error.message,
+          stack: error.stack,
         });
       });
 
+    // Always return 200 OK immediately to Bland
     res.status(200).json({
       success: true,
-      message: "Webhook received",
+      message: "Webhook received and processing",
       requestId,
+      call_id: callId,
     });
   } catch (error: any) {
     logger.error("Webhook error", {
       requestId,
       error: error.message,
+      stack: error.stack,
+      payload: req.body,
     });
 
+    // Still return 200 to prevent Bland from retrying
     res.status(200).json({
       success: false,
       error: error.message,
       requestId,
+      note: "Error logged, but returning 200 to prevent retry",
     });
   }
 });
