@@ -27,7 +27,7 @@ interface QueuedRequest {
 }
 
 class SchedulerService {
-  private config: ScheduleConfig;
+  private config!: ScheduleConfig;
   private queue: QueuedRequest[] = [];
   private configPath: string;
 
@@ -148,7 +148,7 @@ class SchedulerService {
         Fri: 5,
         Sat: 6,
       };
-      const currentDay = dayName ? dayMap[dayName] : now.getDay();
+      const currentDay = dayName ? (dayMap[dayName] ?? now.getDay()) : now.getDay();
 
       // Check if current day is in allowed days (empty = all days)
       if (
