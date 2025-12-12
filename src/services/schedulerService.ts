@@ -34,6 +34,7 @@ class SchedulerService {
   constructor() {
     this.configPath = path.join(__dirname, "../../data/scheduler-config.json");
     this.loadConfig();
+    this.loadQueue();
   }
 
   /**

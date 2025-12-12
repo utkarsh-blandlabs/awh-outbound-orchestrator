@@ -2,6 +2,7 @@ import { logger } from "../utils/logger";
 import { errorLogger } from "../utils/errorLogger";
 import { blandService } from "../services/blandService";
 import { CallStateManager } from "../services/callStateManager";
+import { schedulerService } from "../services/schedulerService";
 import {
   ConvosoWebhookPayload,
   OrchestrationResult,
@@ -36,6 +37,26 @@ export async function handleAwhOutbound(
     phone: payload.phone_number,
     name: `${payload.first_name} ${payload.last_name}`,
   });
+
+  // Check if scheduler allows processing this request
+  if (!schedulerService.isActive()) {
+    const queueId = schedulerService.queueRequest("call", payload);
+
+    logger.info("System inactive - request queued", {
+      request_id: requestId,
+      queue_id: queueId,
+      phone: payload.phone_number,
+      lead_id: payload.lead_id,
+    });
+
+    return {
+      success: true,
+      lead_id: payload.lead_id,
+      call_id: queueId,
+      outcome: CallOutcome.NO_ANSWER,
+      error: "System inactive - request queued for later processing",
+    };
+  }
 
   try {
     const callResult = await executeStage(
