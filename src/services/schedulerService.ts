@@ -249,9 +249,51 @@ class SchedulerService {
     this.queue = [];
     this.saveQueue();
 
-    // TODO: Actually process the queued requests
-    // This would call handleAwhOutbound for each queued request
-    logger.info("Queue processing completed", { processed: toProcess.length });
+    // Import handleAwhOutbound dynamically to avoid circular dependency
+    const { handleAwhOutbound } = await import("../logic/awhOrchestrator");
+
+    let processed = 0;
+    let failed = 0;
+
+    for (const request of toProcess) {
+      try {
+        logger.info("Processing queued request", {
+          queue_id: request.id,
+          type: request.type,
+          phone: request.payload.phone_number,
+        });
+
+        const result = await handleAwhOutbound(
+          request.payload,
+          `queued_${request.id}`
+        );
+
+        if (result.success) {
+          processed++;
+        } else {
+          failed++;
+          logger.error("Failed to process queued request", {
+            queue_id: request.id,
+            error: result.error,
+          });
+        }
+
+        // Add delay between calls to respect rate limiting
+        await new Promise((resolve) => setTimeout(resolve, 200));
+      } catch (error: any) {
+        failed++;
+        logger.error("Error processing queued request", {
+          queue_id: request.id,
+          error: error.message,
+        });
+      }
+    }
+
+    logger.info("Queue processing completed", {
+      total: toProcess.length,
+      processed,
+      failed,
+    });
   }
 
   /**
