@@ -41,25 +41,17 @@ jobs:
     if: success()
 
     steps:
-      - name: Trigger Render Deploy Hook (Optional)
-        env:
-          RENDER_HOOK: ${{ secrets.RENDER_DEPLOY_HOOK_URL }}
+      - name: Trigger Render Deploy Hook
+        if: ${{ secrets.RENDER_DEPLOY_HOOK_URL }}
         run: |
-          if [ -n "$RENDER_HOOK" ]; then
-            echo "🚀 Triggering Render deployment via deploy hook..."
-            curl -X POST "$RENDER_HOOK"
-            echo "✅ Render deployment triggered!"
-            echo ""
-            echo "Monitor deployment at: https://dashboard.render.com"
-          else
-            echo "ℹ️  No RENDER_DEPLOY_HOOK_URL secret configured"
-            echo "Render will auto-deploy from async-orchestrator branch"
-            echo "No manual trigger needed"
-          fi
+          echo "🚀 Triggering Render deployment..."
+          curl -X POST "${{ secrets.RENDER_DEPLOY_HOOK_URL }}"
+          echo "✅ Render deployment triggered!"
+          echo ""
+          echo "Monitor deployment at: https://dashboard.render.com"
 
       - name: Deployment Info
         run: |
-          echo ""
           echo "📦 Deployment Information"
           echo "========================"
           echo "Environment: Staging"
