@@ -7,12 +7,14 @@ import { convosoService } from "./convosoService";
 import { logger } from "../utils/logger";
 import { handleAwhOutbound } from "../logic/awhOrchestrator";
 import { ConvosoWebhookPayload } from "../types/awh";
+import { config } from "../config";
 
 interface PollingConfig {
   enabled: boolean;
   intervalMinutes: number; // How often to poll (20-30 minutes)
   batchSize: number; // How many leads to process per cycle (25)
   maxCallAttemptsPerDay: number; // Max attempts before stopping (4)
+  leadsEndpoint: string; // API endpoint for fetching leads
 }
 
 class ConvosoPollingService {
@@ -21,17 +23,28 @@ class ConvosoPollingService {
   private isPolling: boolean = false;
 
   constructor() {
-    // Default configuration
+    // Load configuration from .env file
     this.config = {
-      enabled: false, // Disabled by default - turn on when ready for Dec 22nd
-      intervalMinutes: 30, // Poll every 30 minutes
-      batchSize: 25, // Process 25 leads per cycle
-      maxCallAttemptsPerDay: 4, // Max 4 attempts per lead per day
+      enabled: config.convoso.polling.enabled,
+      intervalMinutes: config.convoso.polling.intervalMinutes,
+      batchSize: config.convoso.polling.batchSize,
+      maxCallAttemptsPerDay: config.convoso.polling.maxCallAttemptsPerDay,
+      leadsEndpoint: config.convoso.polling.leadsEndpoint,
     };
 
     logger.info("Convoso polling service initialized", {
-      config: this.config,
+      config: {
+        ...this.config,
+        leadsEndpoint: this.config.leadsEndpoint
+          ? "configured"
+          : "not configured",
+      },
     });
+
+    // Auto-start if enabled in .env
+    if (this.config.enabled) {
+      this.start();
+    }
   }
 
   /**
@@ -156,36 +169,53 @@ class ConvosoPollingService {
 
   /**
    * Fetch leads from Convoso API
-   * TODO: Update with actual Convoso API endpoint from Jeff
+   * Endpoint configured via CONVOSO_LEADS_ENDPOINT in .env
    */
   private async fetchLeadsFromConvoso(): Promise<ConvosoWebhookPayload[]> {
     try {
-      // TODO: Replace with actual Convoso API endpoint
-      // This is a placeholder - Jeff will provide the actual endpoint
-      logger.info("Fetching leads from Convoso API");
+      // Check if endpoint is configured
+      if (!this.config.leadsEndpoint) {
+        logger.warn(
+          "CONVOSO_LEADS_ENDPOINT not configured in .env - skipping polling"
+        );
+        return [];
+      }
 
-      // Placeholder: Return empty array for now
-      // Once Jeff provides the endpoint, implement actual API call here
-      const leads: ConvosoWebhookPayload[] = [];
-
-      /*
-      Example implementation once endpoint is provided:
-
-      const response = await convosoService.searchLeads({
-        status: ['NEW', 'CALLBACK', 'NO_ANSWER'],
-        call_attempts_lt: this.config.maxCallAttemptsPerDay,
-        limit: this.config.batchSize
+      logger.info("Fetching leads from Convoso API", {
+        endpoint: this.config.leadsEndpoint,
+        batchSize: this.config.batchSize,
+        maxAttempts: this.config.maxCallAttemptsPerDay,
       });
 
-      leads = response.leads;
-      */
+      // Make API call to Convoso endpoint
+      const axios = require("axios");
+      const response = await axios.get(this.config.leadsEndpoint, {
+        headers: {
+          Authorization: `Bearer ${config.convoso.authToken}`,
+          "Content-Type": "application/json",
+        },
+        params: {
+          limit: this.config.batchSize,
+          max_call_attempts: this.config.maxCallAttemptsPerDay,
+          // Additional params can be added based on Convoso API requirements
+        },
+        timeout: 30000,
+      });
+
+      const leads: ConvosoWebhookPayload[] = response.data.leads || [];
+
+      logger.info("Fetched leads from Convoso", {
+        count: leads.length,
+      });
 
       return leads;
     } catch (error: any) {
       logger.error("Failed to fetch leads from Convoso", {
         error: error.message,
+        endpoint: this.config.leadsEndpoint,
       });
-      throw error;
+      // Don't throw - just return empty array so polling continues
+      return [];
     }
   }
 
