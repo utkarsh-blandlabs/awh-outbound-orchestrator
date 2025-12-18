@@ -843,4 +843,132 @@ router.put("/calls/protection/config", (req: Request, res: Response) => {
   }
 });
 
+/**
+ * GET /api/admin/polling/status
+ * Get Convoso polling service status
+ */
+router.get("/polling/status", (req: Request, res: Response) => {
+  try {
+    const { convosoPollingService } = require("../services/convosoPollingService");
+    const status = convosoPollingService.getStatus();
+
+    res.json({
+      success: true,
+      status,
+    });
+  } catch (error: any) {
+    logger.error("Error fetching polling status", { error: error.message });
+    res.status(500).json({
+      success: false,
+      error: error.message,
+    });
+  }
+});
+
+/**
+ * GET /api/admin/polling/config
+ * Get Convoso polling configuration
+ */
+router.get("/polling/config", (req: Request, res: Response) => {
+  try {
+    const { convosoPollingService } = require("../services/convosoPollingService");
+    const config = convosoPollingService.getConfig();
+
+    res.json({
+      success: true,
+      config,
+    });
+  } catch (error: any) {
+    logger.error("Error fetching polling config", { error: error.message });
+    res.status(500).json({
+      success: false,
+      error: error.message,
+    });
+  }
+});
+
+/**
+ * PUT /api/admin/polling/config
+ * Update Convoso polling configuration
+ */
+router.put("/polling/config", (req: Request, res: Response) => {
+  try {
+    const { convosoPollingService } = require("../services/convosoPollingService");
+    const updates = req.body;
+    const config = convosoPollingService.updateConfig(updates);
+
+    logger.info("Polling config updated via API", {
+      updates,
+      triggered_by: (req.headers["x-user"] as string) || "unknown",
+    });
+
+    res.json({
+      success: true,
+      message: "Polling configuration updated",
+      config,
+      status: convosoPollingService.getStatus(),
+    });
+  } catch (error: any) {
+    logger.error("Error updating polling config", { error: error.message });
+    res.status(500).json({
+      success: false,
+      error: error.message,
+    });
+  }
+});
+
+/**
+ * POST /api/admin/polling/start
+ * Start Convoso polling service
+ */
+router.post("/polling/start", (req: Request, res: Response) => {
+  try {
+    const { convosoPollingService } = require("../services/convosoPollingService");
+    convosoPollingService.start();
+
+    logger.info("Polling service started via API", {
+      triggered_by: (req.headers["x-user"] as string) || "unknown",
+    });
+
+    res.json({
+      success: true,
+      message: "Polling service started",
+      status: convosoPollingService.getStatus(),
+    });
+  } catch (error: any) {
+    logger.error("Error starting polling service", { error: error.message });
+    res.status(500).json({
+      success: false,
+      error: error.message,
+    });
+  }
+});
+
+/**
+ * POST /api/admin/polling/stop
+ * Stop Convoso polling service
+ */
+router.post("/polling/stop", (req: Request, res: Response) => {
+  try {
+    const { convosoPollingService } = require("../services/convosoPollingService");
+    convosoPollingService.stop();
+
+    logger.info("Polling service stopped via API", {
+      triggered_by: (req.headers["x-user"] as string) || "unknown",
+    });
+
+    res.json({
+      success: true,
+      message: "Polling service stopped",
+      status: convosoPollingService.getStatus(),
+    });
+  } catch (error: any) {
+    logger.error("Error stopping polling service", { error: error.message });
+    res.status(500).json({
+      success: false,
+      error: error.message,
+    });
+  }
+});
+
 export default router;

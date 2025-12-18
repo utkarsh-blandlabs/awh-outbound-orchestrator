@@ -59,6 +59,24 @@ export async function handleAwhOutbound(
     };
   }
 
+  // NEW: Check call attempts from Convoso (if provided)
+  if (payload.call_attempts && payload.call_attempts >= 4) {
+    logger.info("Call blocked by max attempts from Convoso", {
+      request_id: requestId,
+      phone: payload.phone_number,
+      lead_id: payload.lead_id,
+      call_attempts: payload.call_attempts,
+    });
+
+    return {
+      success: false,
+      lead_id: payload.lead_id,
+      call_id: "",
+      outcome: CallOutcome.NO_ANSWER,
+      error: `Max call attempts reached: ${payload.call_attempts}/4`,
+    };
+  }
+
   // Check call protection rules (duplicate detection, terminal status, etc.)
   const protection = dailyCallTracker.shouldAllowCall(
     payload.phone_number,
