@@ -3,6 +3,7 @@ import { errorLogger } from "../utils/errorLogger";
 import { blandService } from "../services/blandService";
 import { CallStateManager } from "../services/callStateManager";
 import { schedulerService } from "../services/schedulerService";
+import { dailyCallTracker } from "../services/dailyCallTrackerService";
 import {
   ConvosoWebhookPayload,
   OrchestrationResult,
@@ -58,6 +59,44 @@ export async function handleAwhOutbound(
     };
   }
 
+  // Check call protection rules (duplicate detection, terminal status, etc.)
+  const protection = dailyCallTracker.shouldAllowCall(
+    payload.phone_number,
+    payload.lead_id
+  );
+
+  if (!protection.allow) {
+    logger.info("Call blocked by protection rules", {
+      request_id: requestId,
+      phone: payload.phone_number,
+      lead_id: payload.lead_id,
+      reason: protection.reason,
+      action: protection.action,
+    });
+
+    if (protection.action === "queue") {
+      // Another call is active for this number - queue this request
+      const queueId = schedulerService.queueRequest("call", payload);
+
+      return {
+        success: true,
+        lead_id: payload.lead_id,
+        call_id: queueId,
+        outcome: CallOutcome.NO_ANSWER,
+        error: `Request queued: ${protection.reason}`,
+      };
+    } else {
+      // Blocked due to terminal status or other rule
+      return {
+        success: false,
+        lead_id: payload.lead_id,
+        call_id: "",
+        outcome: CallOutcome.NO_ANSWER,
+        error: protection.reason,
+      };
+    }
+  }
+
   try {
     const callResult = await executeStage(
       OrchestrationStage.BLAND_CALL,
@@ -82,6 +121,14 @@ export async function handleAwhOutbound(
       payload.last_name
     );
     currentStage = OrchestrationStage.WEBHOOK_REGISTERED;
+
+    // Record call start in daily tracker
+    dailyCallTracker.recordCallStart(
+      payload.phone_number,
+      payload.lead_id,
+      callResponse.call_id,
+      requestId || ""
+    );
 
     logger.info("Call initiated, waiting for webhook", {
       request_id: requestId,

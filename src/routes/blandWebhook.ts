@@ -3,6 +3,7 @@ import { logger } from "../utils/logger";
 import { CallStateManager } from "../services/callStateManager";
 import { convosoService } from "../services/convosoService";
 import { statisticsService } from "../services/statisticsService";
+import { dailyCallTracker } from "../services/dailyCallTrackerService";
 import { BlandTranscript, CallOutcome } from "../types/awh";
 
 const router = Router();
@@ -135,6 +136,14 @@ async function processCallCompletion(
       transcript.answered_by
     );
 
+    // Record call completion in daily tracker
+    dailyCallTracker.recordCallComplete(
+      callState.phone_number,
+      callState.call_id,
+      transcript.outcome,
+      transcript
+    );
+
     CallStateManager.completeCall(callState.call_id);
   } catch (error: any) {
     logger.error("Convoso update failed", {
@@ -145,6 +154,13 @@ async function processCallCompletion(
 
     // Record failure statistics
     statisticsService.recordCallFailure(error.message);
+
+    // Record call failure in daily tracker
+    dailyCallTracker.recordCallFailure(
+      callState.phone_number,
+      callState.call_id,
+      error.message
+    );
 
     CallStateManager.failCall(callState.call_id, error.message);
     throw error;

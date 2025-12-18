@@ -237,16 +237,35 @@ class SchedulerService {
 
   /**
    * Process queue (called when system becomes active)
+   * @param batchSize Optional number of items to process (default: all)
+   * @returns Statistics about processed items
    */
-  async processQueue(): Promise<void> {
+  async processQueue(batchSize?: number): Promise<{
+    total: number;
+    processed: number;
+    failed: number;
+    remaining: number;
+  }> {
     if (this.queue.length === 0) {
-      return;
+      return {
+        total: 0,
+        processed: 0,
+        failed: 0,
+        remaining: 0,
+      };
     }
 
-    logger.info("Processing queued requests", { count: this.queue.length });
+    const queueSize = this.queue.length;
+    const itemsToProcess = batchSize && batchSize < queueSize ? batchSize : queueSize;
 
-    const toProcess = [...this.queue];
-    this.queue = [];
+    logger.info("Processing queued requests", {
+      total_queue: queueSize,
+      processing: itemsToProcess,
+      batch_size: batchSize || "all",
+    });
+
+    // Take only the batch from the queue
+    const toProcess = this.queue.splice(0, itemsToProcess);
     this.saveQueue();
 
     // Import handleAwhOutbound dynamically to avoid circular dependency
@@ -289,11 +308,21 @@ class SchedulerService {
       }
     }
 
+    const remaining = this.queue.length;
+
     logger.info("Queue processing completed", {
       total: toProcess.length,
       processed,
       failed,
+      remaining,
     });
+
+    return {
+      total: toProcess.length,
+      processed,
+      failed,
+      remaining,
+    };
   }
 
   /**

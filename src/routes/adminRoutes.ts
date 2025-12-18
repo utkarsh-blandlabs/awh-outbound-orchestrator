@@ -8,6 +8,7 @@ import { CallStateManager } from "../services/callStateManager";
 import { blandRateLimiter } from "../utils/rateLimiter";
 import { statisticsService } from "../services/statisticsService";
 import { schedulerService } from "../services/schedulerService";
+import { dailyCallTracker } from "../services/dailyCallTrackerService";
 import { logger } from "../utils/logger";
 
 const router = Router();
@@ -571,15 +572,29 @@ router.get("/scheduler/queue", (req: Request, res: Response) => {
  */
 router.post("/scheduler/queue/process", async (req: Request, res: Response) => {
   try {
-    await schedulerService.processQueue();
+    const batchSize = req.query["batch_size"]
+      ? parseInt(req.query["batch_size"] as string, 10)
+      : undefined;
+
+    const result = await schedulerService.processQueue(batchSize);
 
     logger.info("Queue processed via API", {
       triggered_by: (req.headers["x-user"] as string) || "unknown",
+      batch_size: batchSize || "all",
+      total: result.total,
+      processed: result.processed,
+      failed: result.failed,
+      remaining: result.remaining,
     });
 
     res.json({
       success: true,
-      message: "Queue processed successfully",
+      message: "Queue batch processed successfully",
+      total: result.total,
+      processed: result.processed,
+      failed: result.failed,
+      remaining: result.remaining,
+      continue: result.remaining > 0,
     });
   } catch (error: any) {
     logger.error("Error processing queue", { error: error.message });
@@ -610,6 +625,217 @@ router.delete("/scheduler/queue", (req: Request, res: Response) => {
     });
   } catch (error: any) {
     logger.error("Error clearing queue", { error: error.message });
+    res.status(500).json({
+      success: false,
+      error: error.message,
+    });
+  }
+});
+
+// ============================================================================
+// Call Protection & History Endpoints
+// ============================================================================
+
+/**
+ * GET /api/admin/calls/history/:phoneNumber
+ * Get call history for a specific phone number
+ */
+router.get("/calls/history/:phoneNumber", (req: Request, res: Response) => {
+  try {
+    const phoneNumber = req.params["phoneNumber"];
+
+    if (!phoneNumber) {
+      return res.status(400).json({
+        success: false,
+        error: "Phone number is required",
+      });
+    }
+
+    const history = dailyCallTracker.getCallHistory(phoneNumber);
+
+    if (!history) {
+      return res.status(404).json({
+        success: false,
+        error: "No call history found for this number",
+      });
+    }
+
+    res.json({
+      success: true,
+      history,
+    });
+  } catch (error: any) {
+    logger.error("Error fetching call history", { error: error.message });
+    res.status(500).json({
+      success: false,
+      error: error.message,
+    });
+  }
+});
+
+/**
+ * GET /api/admin/calls/today
+ * Get all calls made today
+ */
+router.get("/calls/today", (req: Request, res: Response) => {
+  try {
+    const records = dailyCallTracker.getAllRecords();
+
+    res.json({
+      success: true,
+      total_numbers: records.length,
+      records,
+    });
+  } catch (error: any) {
+    logger.error("Error fetching today's calls", { error: error.message });
+    res.status(500).json({
+      success: false,
+      error: error.message,
+    });
+  }
+});
+
+/**
+ * GET /api/admin/calls/stats/daily
+ * Get today's call statistics
+ */
+router.get("/calls/stats/daily", (req: Request, res: Response) => {
+  try {
+    const stats = dailyCallTracker.getTodayStats();
+
+    res.json({
+      success: true,
+      stats,
+    });
+  } catch (error: any) {
+    logger.error("Error fetching daily stats", { error: error.message });
+    res.status(500).json({
+      success: false,
+      error: error.message,
+    });
+  }
+});
+
+/**
+ * POST /api/admin/calls/block
+ * Manually block a phone number
+ */
+router.post("/calls/block", (req: Request, res: Response) => {
+  try {
+    const { phone_number, reason } = req.body;
+
+    if (!phone_number) {
+      return res.status(400).json({
+        success: false,
+        error: "phone_number is required",
+      });
+    }
+
+    dailyCallTracker.blockNumber(
+      phone_number,
+      reason || "Manually blocked via API"
+    );
+
+    logger.info("Number blocked via API", {
+      phone_number,
+      reason,
+      triggered_by: (req.headers["x-user"] as string) || "unknown",
+    });
+
+    res.json({
+      success: true,
+      message: "Number blocked successfully",
+      phone_number,
+    });
+  } catch (error: any) {
+    logger.error("Error blocking number", { error: error.message });
+    res.status(500).json({
+      success: false,
+      error: error.message,
+    });
+  }
+});
+
+/**
+ * POST /api/admin/calls/unblock
+ * Unblock a phone number
+ */
+router.post("/calls/unblock", (req: Request, res: Response) => {
+  try {
+    const { phone_number } = req.body;
+
+    if (!phone_number) {
+      return res.status(400).json({
+        success: false,
+        error: "phone_number is required",
+      });
+    }
+
+    dailyCallTracker.unblockNumber(phone_number);
+
+    logger.info("Number unblocked via API", {
+      phone_number,
+      triggered_by: (req.headers["x-user"] as string) || "unknown",
+    });
+
+    res.json({
+      success: true,
+      message: "Number unblocked successfully",
+      phone_number,
+    });
+  } catch (error: any) {
+    logger.error("Error unblocking number", { error: error.message });
+    res.status(500).json({
+      success: false,
+      error: error.message,
+    });
+  }
+});
+
+/**
+ * GET /api/admin/calls/protection/config
+ * Get call protection configuration
+ */
+router.get("/calls/protection/config", (req: Request, res: Response) => {
+  try {
+    const config = dailyCallTracker.getConfig();
+
+    res.json({
+      success: true,
+      config,
+    });
+  } catch (error: any) {
+    logger.error("Error fetching protection config", { error: error.message });
+    res.status(500).json({
+      success: false,
+      error: error.message,
+    });
+  }
+});
+
+/**
+ * PUT /api/admin/calls/protection/config
+ * Update call protection configuration
+ */
+router.put("/calls/protection/config", (req: Request, res: Response) => {
+  try {
+    const updates = req.body;
+    const config = dailyCallTracker.updateConfig(updates);
+
+    logger.info("Call protection config updated via API", {
+      updates,
+      triggered_by: (req.headers["x-user"] as string) || "unknown",
+    });
+
+    res.json({
+      success: true,
+      message: "Configuration updated successfully",
+      config,
+    });
+  } catch (error: any) {
+    logger.error("Error updating protection config", {
+      error: error.message,
+    });
     res.status(500).json({
       success: false,
       error: error.message,
