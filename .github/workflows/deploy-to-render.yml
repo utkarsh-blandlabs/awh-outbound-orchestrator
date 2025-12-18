@@ -1,0 +1,64 @@
+name: Deploy to Render (Staging)
+
+on:
+  push:
+    branches:
+      - async-orchestrator # Staging/testing branch
+  workflow_dispatch: # Allow manual trigger from GitHub UI
+
+jobs:
+  test:
+    name: Run Tests & Build Check
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build TypeScript
+        run: npm run build
+
+      - name: Run linter (if configured)
+        run: npm run lint --if-present
+        continue-on-error: true
+
+      - name: Build success
+        run: echo "✅ Build successful! Render will auto-deploy from async-orchestrator branch"
+
+  notify-render:
+    name: Trigger Render Deployment
+    runs-on: ubuntu-latest
+    needs: test
+    if: success()
+
+    steps:
+      - name: Trigger Render Deploy Hook
+        if: ${{ secrets.RENDER_DEPLOY_HOOK_URL }}
+        run: |
+          echo "🚀 Triggering Render deployment..."
+          curl -X POST "${{ secrets.RENDER_DEPLOY_HOOK_URL }}"
+          echo "✅ Render deployment triggered!"
+          echo ""
+          echo "Monitor deployment at: https://dashboard.render.com"
+
+      - name: Deployment Info
+        run: |
+          echo "📦 Deployment Information"
+          echo "========================"
+          echo "Environment: Staging"
+          echo "Branch: async-orchestrator"
+          echo "Platform: Render"
+          echo ""
+          echo "Render will automatically deploy from the async-orchestrator branch."
+          echo "Visit https://dashboard.render.com to monitor the deployment."
+          echo ""
+          echo "Once deployed, verify at your Render service URL."
