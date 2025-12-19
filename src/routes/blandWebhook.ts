@@ -4,6 +4,7 @@ import { CallStateManager } from "../services/callStateManager";
 import { convosoService } from "../services/convosoService";
 import { statisticsService } from "../services/statisticsService";
 import { dailyCallTracker } from "../services/dailyCallTrackerService";
+import { answeringMachineTracker } from "../services/answeringMachineTrackerService";
 import { BlandTranscript, CallOutcome } from "../types/awh";
 
 const router = Router();
@@ -142,6 +143,14 @@ async function processCallCompletion(
       callState.call_id,
       transcript.outcome,
       transcript
+    );
+
+    // Record attempt in answering machine tracker (if status is tracked)
+    answeringMachineTracker.recordAttempt(
+      callState.lead_id,
+      callState.phone_number,
+      transcript.outcome,
+      callState.call_id
     );
 
     CallStateManager.completeCall(callState.call_id);

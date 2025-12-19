@@ -4,6 +4,7 @@ import { blandService } from "../services/blandService";
 import { CallStateManager } from "../services/callStateManager";
 import { schedulerService } from "../services/schedulerService";
 import { dailyCallTracker } from "../services/dailyCallTrackerService";
+import { answeringMachineTracker } from "../services/answeringMachineTrackerService";
 import {
   ConvosoWebhookPayload,
   OrchestrationResult,
@@ -62,6 +63,32 @@ export async function handleAwhOutbound(
   // NOTE: Call attempt tracking (4 per day) is handled by Convoso
   // They filter leads on their side before sending to our polling endpoint
   // We trust their filtering and don't duplicate the check here
+
+  // Check answering machine tracker (voicemail/no-answer retry limits by lead_id + phone)
+  const amDecision = answeringMachineTracker.shouldAllowCall(
+    payload.lead_id,
+    payload.phone_number,
+    payload.status
+  );
+
+  if (!amDecision.allow) {
+    logger.info("Call blocked by answering machine tracker", {
+      request_id: requestId,
+      phone: payload.phone_number,
+      lead_id: payload.lead_id,
+      reason: amDecision.reason,
+      current_attempts: amDecision.current_attempts,
+      max_attempts: amDecision.max_attempts,
+    });
+
+    return {
+      success: false,
+      lead_id: payload.lead_id,
+      call_id: "",
+      outcome: CallOutcome.NO_ANSWER,
+      error: amDecision.reason,
+    };
+  }
 
   // Check call protection rules (duplicate detection, terminal status, etc.)
   const protection = dailyCallTracker.shouldAllowCall(

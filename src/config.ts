@@ -39,7 +39,7 @@ export const config = {
 
     // Voicemail settings
     voicemailMessage: process.env["BLAND_VOICEMAIL_MESSAGE"] || "",
-    voicemailAction: process.env["BLAND_VOICEMAIL_ACTION"] || "leave_message",
+    voicemailAction: process.env["BLAND_VOICEMAIL_ACTION"] || "",
     answeredByEnabled: process.env["BLAND_ANSWERED_BY_ENABLED"] === "true",
     sensitiveVoicemailDetection:
       process.env["BLAND_SENSITIVE_VOICEMAIL_DETECTION"] === "true",
@@ -94,6 +94,32 @@ export const config = {
     ),
     sameNumberIntervalMs: parseInt(
       process.env["RATE_LIMITER_SAME_NUMBER_INTERVAL_MS"] || "10000"
+    ),
+  },
+
+  // Answering Machine Tracker config
+  answeringMachineTracker: {
+    enabled: process.env["ANSWERING_MACHINE_TRACKING_ENABLED"] === "true",
+    maxAttemptsPerLead: parseInt(
+      process.env["ANSWERING_MACHINE_MAX_ATTEMPTS"] || "4"
+    ),
+    flushHourEST: parseFloat(
+      process.env["ANSWERING_MACHINE_FLUSH_HOUR_EST"] || "20.5"
+    ),
+    trackedStatuses: (
+      process.env["ANSWERING_MACHINE_TRACKED_STATUSES"] ||
+      "VOICEMAIL,NO_ANSWER,new,answer machine,answering machine,"
+    )
+      .split(",")
+      .map((s) => s.trim())
+      .filter((s) => s.length > 0),
+  },
+
+  // Queue Processor config
+  queueProcessor: {
+    enabled: process.env["QUEUE_PROCESSOR_ENABLED"] === "true",
+    intervalMinutes: parseInt(
+      process.env["QUEUE_PROCESSOR_INTERVAL_MINUTES"] || "30"
     ),
   },
 
