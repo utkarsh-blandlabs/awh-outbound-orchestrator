@@ -241,17 +241,8 @@ class ConvosoPollingService {
       // Process batch with delay between calls
       for (const lead of batch) {
         try {
-          // Check if lead should be called based on attempts
-          if (
-            lead.call_attempts &&
-            lead.call_attempts >= this.config.maxCallAttemptsPerDay
-          ) {
-            logger.info("Skipping lead - max attempts reached", {
-              lead_id: lead.lead_id,
-              call_attempts: lead.call_attempts,
-            });
-            continue;
-          }
+          // NOTE: Call attempt tracking (4 per day) is handled by Convoso
+          // Leads returned from polling endpoint are already filtered by their system
 
           // Trigger outbound call via orchestrator
           const result = await handleAwhOutbound(lead, `poll_${Date.now()}`);
