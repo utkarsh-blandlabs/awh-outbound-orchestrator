@@ -59,6 +59,10 @@ export async function handleAwhOutbound(
     };
   }
 
+  // NOTE: Call attempt tracking (4 per day) is handled by Convoso
+  // They filter leads on their side before sending to our polling endpoint
+  // We trust their filtering and don't duplicate the check here
+
   // Check call protection rules (duplicate detection, terminal status, etc.)
   const protection = dailyCallTracker.shouldAllowCall(
     payload.phone_number,

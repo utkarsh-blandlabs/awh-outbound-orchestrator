@@ -64,6 +64,19 @@ export const config = {
   convoso: {
     authToken: process.env["CONVOSO_AUTH_TOKEN"] || "",
     baseUrl: process.env["CONVOSO_BASE_URL"] || "https://api.convoso.com",
+    // Polling config for autonomous dialing (Dec 22nd feature)
+    polling: {
+      enabled: process.env["CONVOSO_POLLING_ENABLED"] === "true",
+      intervalMinutes: parseInt(
+        process.env["CONVOSO_POLLING_INTERVAL_MINUTES"] || "30"
+      ),
+      batchSize: parseInt(process.env["CONVOSO_POLLING_BATCH_SIZE"] || "25"),
+      maxCallAttemptsPerDay: parseInt(
+        process.env["CONVOSO_POLLING_MAX_ATTEMPTS"] || "4"
+      ),
+      // API endpoint for fetching leads (provided by Jeff)
+      leadsEndpoint: process.env["CONVOSO_LEADS_ENDPOINT"] || "",
+    },
   },
 
   // Retry config

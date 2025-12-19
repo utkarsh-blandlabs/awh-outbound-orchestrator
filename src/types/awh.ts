@@ -28,6 +28,10 @@ export interface ConvosoWebhookPayload {
   // IMPORTANT: Required for updating call transcripts via /v1/log/update
   call_log_id?: string;
 
+  // NEW: For Dec 22nd autonomous dialing
+  call_attempts?: number; // How many times this lead has been called
+  // status field above now also used for lead status (NEW, TRANSFERRED, SALE, etc.)
+
   // Allow additional fields
   [key: string]: any;
 }
