@@ -9,6 +9,7 @@ import { blandRateLimiter } from "../utils/rateLimiter";
 import { statisticsService } from "../services/statisticsService";
 import { schedulerService } from "../services/schedulerService";
 import { dailyCallTracker } from "../services/dailyCallTrackerService";
+import { answeringMachineTracker } from "../services/answeringMachineTrackerService";
 import { logger } from "../utils/logger";
 
 const router = Router();
@@ -964,6 +965,435 @@ router.post("/polling/stop", (req: Request, res: Response) => {
     });
   } catch (error: any) {
     logger.error("Error stopping polling service", { error: error.message });
+    res.status(500).json({
+      success: false,
+      error: error.message,
+    });
+  }
+});
+
+// ============================================================================
+// Answering Machine Tracker Endpoints
+// ============================================================================
+
+/**
+ * GET /api/admin/am-tracker/config
+ * Get answering machine tracker configuration
+ */
+router.get("/am-tracker/config", (req: Request, res: Response) => {
+  try {
+    const config = answeringMachineTracker.getConfig();
+
+    res.json({
+      success: true,
+      config,
+    });
+  } catch (error: any) {
+    logger.error("Error fetching AM tracker config", { error: error.message });
+    res.status(500).json({
+      success: false,
+      error: error.message,
+    });
+  }
+});
+
+/**
+ * PUT /api/admin/am-tracker/config
+ * Update answering machine tracker configuration
+ */
+router.put("/am-tracker/config", (req: Request, res: Response) => {
+  try {
+    const updates = req.body;
+    const config = answeringMachineTracker.updateConfig(updates);
+
+    logger.info("AM tracker config updated via API", {
+      updates,
+      triggered_by: (req.headers["x-user"] as string) || "unknown",
+    });
+
+    res.json({
+      success: true,
+      message: "Configuration updated successfully",
+      config,
+    });
+  } catch (error: any) {
+    logger.error("Error updating AM tracker config", {
+      error: error.message,
+    });
+    res.status(500).json({
+      success: false,
+      error: error.message,
+    });
+  }
+});
+
+/**
+ * GET /api/admin/am-tracker/stats
+ * Get answering machine tracker statistics
+ */
+router.get("/am-tracker/stats", (req: Request, res: Response) => {
+  try {
+    const stats = answeringMachineTracker.getStats();
+
+    res.json({
+      success: true,
+      stats,
+    });
+  } catch (error: any) {
+    logger.error("Error fetching AM tracker stats", { error: error.message });
+    res.status(500).json({
+      success: false,
+      error: error.message,
+    });
+  }
+});
+
+/**
+ * GET /api/admin/am-tracker/records
+ * Get all answering machine tracker records (for debugging)
+ */
+router.get("/am-tracker/records", (req: Request, res: Response) => {
+  try {
+    const records = answeringMachineTracker.getAllRecords();
+
+    res.json({
+      success: true,
+      total: records.length,
+      records,
+    });
+  } catch (error: any) {
+    logger.error("Error fetching AM tracker records", { error: error.message });
+    res.status(500).json({
+      success: false,
+      error: error.message,
+    });
+  }
+});
+
+/**
+ * POST /api/admin/am-tracker/enable
+ * Enable answering machine tracking
+ */
+router.post("/am-tracker/enable", (req: Request, res: Response) => {
+  try {
+    answeringMachineTracker.setEnabled(true);
+
+    logger.info("AM tracker enabled via API", {
+      triggered_by: (req.headers["x-user"] as string) || "unknown",
+    });
+
+    res.json({
+      success: true,
+      message: "Answering machine tracker enabled",
+      config: answeringMachineTracker.getConfig(),
+    });
+  } catch (error: any) {
+    logger.error("Error enabling AM tracker", { error: error.message });
+    res.status(500).json({
+      success: false,
+      error: error.message,
+    });
+  }
+});
+
+/**
+ * POST /api/admin/am-tracker/disable
+ * Disable answering machine tracking
+ */
+router.post("/am-tracker/disable", (req: Request, res: Response) => {
+  try {
+    answeringMachineTracker.setEnabled(false);
+
+    logger.info("AM tracker disabled via API", {
+      triggered_by: (req.headers["x-user"] as string) || "unknown",
+    });
+
+    res.json({
+      success: true,
+      message: "Answering machine tracker disabled",
+      config: answeringMachineTracker.getConfig(),
+    });
+  } catch (error: any) {
+    logger.error("Error disabling AM tracker", { error: error.message });
+    res.status(500).json({
+      success: false,
+      error: error.message,
+    });
+  }
+});
+
+/**
+ * POST /api/admin/am-tracker/clear
+ * Clear all answering machine tracker records
+ */
+router.post("/am-tracker/clear", (req: Request, res: Response) => {
+  try {
+    answeringMachineTracker.clearAll();
+
+    logger.info("AM tracker records cleared via API", {
+      triggered_by: (req.headers["x-user"] as string) || "unknown",
+    });
+
+    res.json({
+      success: true,
+      message: "All records cleared",
+    });
+  } catch (error: any) {
+    logger.error("Error clearing AM tracker records", { error: error.message });
+    res.status(500).json({
+      success: false,
+      error: error.message,
+    });
+  }
+});
+
+/**
+ * PUT /api/admin/am-tracker/statuses
+ * Update tracked statuses dynamically
+ */
+router.put("/am-tracker/statuses", (req: Request, res: Response) => {
+  try {
+    const { tracked_statuses } = req.body;
+
+    if (!tracked_statuses || !Array.isArray(tracked_statuses)) {
+      return res.status(400).json({
+        success: false,
+        error: "tracked_statuses must be an array",
+      });
+    }
+
+    const config = answeringMachineTracker.updateConfig({
+      tracked_statuses,
+    });
+
+    logger.info("AM tracker statuses updated via API", {
+      tracked_statuses,
+      triggered_by: (req.headers["x-user"] as string) || "unknown",
+    });
+
+    res.json({
+      success: true,
+      message: "Tracked statuses updated successfully",
+      config,
+    });
+  } catch (error: any) {
+    logger.error("Error updating AM tracker statuses", {
+      error: error.message,
+    });
+    res.status(500).json({
+      success: false,
+      error: error.message,
+    });
+  }
+});
+
+/**
+ * GET /api/admin/queue-processor/status
+ * Get queue processor status
+ */
+router.get("/queue-processor/status", (req: Request, res: Response) => {
+  try {
+    const { queueProcessorService } = require("../services/queueProcessorService");
+    const status = queueProcessorService.getStatus();
+
+    res.json({
+      success: true,
+      status,
+    });
+  } catch (error: any) {
+    logger.error("Error fetching queue processor status", { error: error.message });
+    res.status(500).json({
+      success: false,
+      error: error.message,
+    });
+  }
+});
+
+/**
+ * POST /api/admin/queue-processor/process
+ * Manually trigger queue processing
+ */
+router.post("/queue-processor/process", async (req: Request, res: Response) => {
+  try {
+    const { queueProcessorService } = require("../services/queueProcessorService");
+    const result = await queueProcessorService.processNow();
+
+    logger.info("Queue processed manually via API", {
+      triggered_by: (req.headers["x-user"] as string) || "unknown",
+      result,
+    });
+
+    res.json({
+      success: true,
+      message: "Queue processing completed",
+      result,
+    });
+  } catch (error: any) {
+    logger.error("Error processing queue manually", { error: error.message });
+    res.status(500).json({
+      success: false,
+      error: error.message,
+    });
+  }
+});
+
+/**
+ * GET /api/admin/queue-processor/config
+ * Get queue processor configuration
+ */
+router.get("/queue-processor/config", (req: Request, res: Response) => {
+  try {
+    const { queueProcessorService } = require("../services/queueProcessorService");
+    const config = queueProcessorService.getConfig();
+
+    res.json({
+      success: true,
+      config,
+    });
+  } catch (error: any) {
+    logger.error("Error fetching queue processor config", { error: error.message });
+    res.status(500).json({
+      success: false,
+      error: error.message,
+    });
+  }
+});
+
+/**
+ * PUT /api/admin/queue-processor/config
+ * Update queue processor configuration
+ */
+router.put("/queue-processor/config", (req: Request, res: Response) => {
+  try {
+    const { queueProcessorService } = require("../services/queueProcessorService");
+    const updates = req.body;
+    const config = queueProcessorService.updateConfig(updates);
+
+    logger.info("Queue processor config updated via API", {
+      updates,
+      triggered_by: (req.headers["x-user"] as string) || "unknown",
+    });
+
+    res.json({
+      success: true,
+      message: "Configuration updated successfully",
+      config,
+      status: queueProcessorService.getStatus(),
+    });
+  } catch (error: any) {
+    logger.error("Error updating queue processor config", {
+      error: error.message,
+    });
+    res.status(500).json({
+      success: false,
+      error: error.message,
+    });
+  }
+});
+
+/**
+ * POST /api/admin/queue-processor/start
+ * Start queue processor
+ */
+router.post("/queue-processor/start", (req: Request, res: Response) => {
+  try {
+    const { queueProcessorService } = require("../services/queueProcessorService");
+    queueProcessorService.start();
+
+    logger.info("Queue processor started via API", {
+      triggered_by: (req.headers["x-user"] as string) || "unknown",
+    });
+
+    res.json({
+      success: true,
+      message: "Queue processor started",
+      status: queueProcessorService.getStatus(),
+    });
+  } catch (error: any) {
+    logger.error("Error starting queue processor", { error: error.message });
+    res.status(500).json({
+      success: false,
+      error: error.message,
+    });
+  }
+});
+
+/**
+ * POST /api/admin/queue-processor/stop
+ * Stop queue processor
+ */
+router.post("/queue-processor/stop", (req: Request, res: Response) => {
+  try {
+    const { queueProcessorService } = require("../services/queueProcessorService");
+    queueProcessorService.stop();
+
+    logger.info("Queue processor stopped via API", {
+      triggered_by: (req.headers["x-user"] as string) || "unknown",
+    });
+
+    res.json({
+      success: true,
+      message: "Queue processor stopped",
+      status: queueProcessorService.getStatus(),
+    });
+  } catch (error: any) {
+    logger.error("Error stopping queue processor", { error: error.message });
+    res.status(500).json({
+      success: false,
+      error: error.message,
+    });
+  }
+});
+
+/**
+ * POST /api/admin/queue-processor/enable
+ * Enable queue processor (auto-start)
+ */
+router.post("/queue-processor/enable", (req: Request, res: Response) => {
+  try {
+    const { queueProcessorService } = require("../services/queueProcessorService");
+    queueProcessorService.setEnabled(true);
+
+    logger.info("Queue processor enabled via API", {
+      triggered_by: (req.headers["x-user"] as string) || "unknown",
+    });
+
+    res.json({
+      success: true,
+      message: "Queue processor enabled",
+      config: queueProcessorService.getConfig(),
+      status: queueProcessorService.getStatus(),
+    });
+  } catch (error: any) {
+    logger.error("Error enabling queue processor", { error: error.message });
+    res.status(500).json({
+      success: false,
+      error: error.message,
+    });
+  }
+});
+
+/**
+ * POST /api/admin/queue-processor/disable
+ * Disable queue processor (stop auto-processing)
+ */
+router.post("/queue-processor/disable", (req: Request, res: Response) => {
+  try {
+    const { queueProcessorService } = require("../services/queueProcessorService");
+    queueProcessorService.setEnabled(false);
+
+    logger.info("Queue processor disabled via API", {
+      triggered_by: (req.headers["x-user"] as string) || "unknown",
+    });
+
+    res.json({
+      success: true,
+      message: "Queue processor disabled",
+      config: queueProcessorService.getConfig(),
+      status: queueProcessorService.getStatus(),
+    });
+  } catch (error: any) {
+    logger.error("Error disabling queue processor", { error: error.message });
     res.status(500).json({
       success: false,
       error: error.message,

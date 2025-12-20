@@ -10,6 +10,9 @@ import blandWebhookRouter from "./routes/blandWebhook";
 import callbackWebhookRouter from "./routes/callbackWebhook";
 import adminRouter from "./routes/adminRoutes";
 
+// Import services (they auto-start in their constructors)
+import "./services/queueProcessorService";
+
 // Validate environment variables
 validateConfig();
 
