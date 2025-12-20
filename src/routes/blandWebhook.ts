@@ -9,6 +9,20 @@ import { BlandTranscript, CallOutcome } from "../types/awh";
 
 const router = Router();
 
+// ============================================================================
+// IMPORTANT: Webhook Processing Behavior
+// ============================================================================
+// This webhook processes ALL callbacks from Bland AI regardless of scheduler state.
+// This is BY DESIGN because:
+// 1. Calls initiated during business hours may complete after hours
+// 2. We must process webhooks to avoid orphaned calls in cache
+// 3. Convoso updates must happen for all completed calls
+// 4. The scheduler only controls INITIATING new calls, not processing results
+//
+// Edge Case Handled: #1 - Callback arrives when scheduler is OFF
+// Resolution: Always process webhooks; scheduler state is irrelevant for completions
+// ============================================================================
+
 router.post("/bland-callback", async (req: Request, res: Response) => {
   const requestId = `bland_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`;
   const callId = req.body.call_id || req.body.c_id;
