@@ -133,6 +133,17 @@ class RedialQueueService {
   }
 
   /**
+   * Get current date in EST timezone (YYYY-MM-DD)
+   */
+  private getCurrentDateEST(): string {
+    const now = new Date();
+    const estOffset = -5 * 60; // EST is UTC-5
+    const utc = now.getTime() + now.getTimezoneOffset() * 60000;
+    const estTime = new Date(utc + estOffset * 60000);
+    return estTime.toISOString().substring(0, 10); // YYYY-MM-DD
+  }
+
+  /**
    * Get current timestamp in EST
    */
   private getNowEST(): number {
@@ -267,6 +278,27 @@ class RedialQueueService {
       return;
     }
 
+    // CRITICAL: Check if there's an active call to this phone number
+    // This prevents duplicate calls while a call is still ongoing
+    const { CallStateManager } = await import("./callStateManager");
+    const activeCalls = CallStateManager.getAllPendingCalls();
+    const activeCallToNumber = activeCalls.find(
+      (call) =>
+        call.phone_number === phoneNumber &&
+        call.status === "pending" &&
+        call.call_id !== callId // Exclude the current call that just triggered the webhook
+    );
+
+    if (activeCallToNumber) {
+      logger.warn("Skipping redial queue add - active call in progress to this number", {
+        lead_id: leadId,
+        phone: phoneNumber,
+        active_call_id: activeCallToNumber.call_id,
+        webhook_call_id: callId,
+      });
+      return; // Don't add to redial queue while call is active
+    }
+
     // Check if this is a success outcome - if yes, mark as completed
     if (this.isSuccessOutcome(outcome)) {
       await this.markCompleted(leadId, phoneNumber, outcome);
@@ -314,7 +346,12 @@ class RedialQueueService {
       } else {
         // Use progressive interval based on attempt number
         const intervalMinutes = this.getProgressiveInterval(existing.attempts);
-        existing.next_redial_timestamp = now + intervalMinutes * 60 * 1000;
+        // IMPORTANT: Add minimum 2-minute delay even for "instant" (0 min) intervals
+        // This prevents race conditions where call is still active/completing
+        const actualIntervalMs = intervalMinutes === 0
+          ? 2 * 60 * 1000 // 2 minutes minimum
+          : intervalMinutes * 60 * 1000;
+        existing.next_redial_timestamp = now + actualIntervalMs;
         existing.status = "pending";
       }
 
@@ -334,7 +371,13 @@ class RedialQueueService {
       });
     } else {
       // Create new record with progressive interval for first attempt
-      const firstIntervalMinutes = this.getProgressiveInterval(1); // 10 minutes
+      const firstIntervalMinutes = this.getProgressiveInterval(1);
+      // IMPORTANT: Add minimum 2-minute delay even for "instant" (0 min) intervals
+      // This prevents race conditions where call is still active/completing
+      const actualIntervalMs = firstIntervalMinutes === 0
+        ? 2 * 60 * 1000 // 2 minutes minimum
+        : firstIntervalMinutes * 60 * 1000;
+
       const newRecord: RedialRecord = {
         lead_id: leadId,
         phone_number: phoneNumber,
@@ -344,8 +387,7 @@ class RedialQueueService {
         state: state,
         attempts: 1,
         last_call_timestamp: now,
-        next_redial_timestamp: scheduledCallbackTime ||
-          now + firstIntervalMinutes * 60 * 1000,
+        next_redial_timestamp: scheduledCallbackTime || (now + actualIntervalMs),
         scheduled_callback_time: scheduledCallbackTime,
         outcomes: [outcome],
         last_outcome: outcome,
@@ -432,20 +474,24 @@ class RedialQueueService {
 
   /**
    * Process redial queue - make calls for leads that are ready
+   * SAFE IMPLEMENTATION: Multiple validation layers before calling
    */
   async processQueue(): Promise<void> {
+    // Safety Check #1: Service enabled
     if (!this.queueConfig.enabled) {
+      logger.debug("Redial queue disabled, skipping processing");
       return;
     }
 
+    // Safety Check #2: Prevent concurrent processing
     if (this.isProcessing) {
-      logger.warn("Redial queue already processing, skipping");
+      logger.warn("Redial queue already processing, skipping to prevent race condition");
       return;
     }
 
-    // Check if scheduler is active (business hours)
+    // Safety Check #3: Check if scheduler is active (business hours)
     if (!schedulerService.isActive()) {
-      logger.info("Redial queue: Scheduler inactive, skipping processing");
+      logger.debug("Redial queue: Scheduler inactive (outside business hours), skipping");
       return;
     }
 
@@ -453,24 +499,102 @@ class RedialQueueService {
 
     try {
       const now = this.getNowEST();
-      const readyLeads = Array.from(this.records.values()).filter(
-        (record) =>
-          record.status === "pending" ||
-          (record.status === "rescheduled" &&
-            record.scheduled_callback_time &&
-            record.scheduled_callback_time <= now)
-      ).filter(
-        (record) =>
-          record.next_redial_timestamp <= now &&
-          record.attempts < this.queueConfig.max_redial_attempts
-      );
+      const todayDate = this.getCurrentDateEST(); // YYYY-MM-DD format
 
-      logger.info("Redial queue processing", {
-        total_records: this.records.size,
+      // Safety Check #4: Reload current month records to get latest data
+      await this.loadCurrentMonthRecords();
+
+      // SAFE FILTERING: Multiple validation layers
+      const allRecords = Array.from(this.records.values());
+
+      logger.info("Redial queue processing started", {
+        total_records: allRecords.length,
+        max_attempts: this.queueConfig.max_redial_attempts,
+        current_time: new Date(now).toISOString(),
+      });
+
+      // Filter #1: Only records from today (created or updated today)
+      const todayRecords = allRecords.filter((record) => {
+        if (!record || !record.created_at) return false;
+        const recordDate = new Date(record.created_at).toISOString().substring(0, 10);
+        return recordDate === todayDate;
+      });
+
+      logger.debug("Filtered to today's records", {
+        today: todayDate,
+        today_records: todayRecords.length,
+      });
+
+      // Filter #2: Only favorable statuses (pending or rescheduled ready)
+      const favorableRecords = todayRecords.filter((record) => {
+        // Null safety checks
+        if (!record || !record.status) return false;
+
+        // Pending records are favorable
+        if (record.status === "pending") return true;
+
+        // Rescheduled records that are due
+        if (record.status === "rescheduled") {
+          if (!record.scheduled_callback_time) return false;
+          return record.scheduled_callback_time <= now;
+        }
+
+        // All other statuses (completed, max_attempts, paused) are not favorable
+        return false;
+      });
+
+      logger.debug("Filtered to favorable statuses", {
+        favorable_records: favorableRecords.length,
+        pending: favorableRecords.filter(r => r.status === "pending").length,
+        rescheduled_ready: favorableRecords.filter(r => r.status === "rescheduled").length,
+      });
+
+      // Filter #3: Only records under max attempts
+      const underMaxAttempts = favorableRecords.filter((record) => {
+        if (!record || typeof record.attempts !== "number") return false;
+        return record.attempts < this.queueConfig.max_redial_attempts;
+      });
+
+      logger.debug("Filtered to under max attempts", {
+        under_max: underMaxAttempts.length,
+        max_attempts: this.queueConfig.max_redial_attempts,
+      });
+
+      // Filter #4: Only records that are due for redial (timestamp passed)
+      const readyLeads = underMaxAttempts.filter((record) => {
+        if (!record || typeof record.next_redial_timestamp !== "number") return false;
+        return record.next_redial_timestamp <= now;
+      });
+
+      // Categorize ready leads by attempt number for visibility
+      const leadsByAttempt = new Map<number, number>();
+      for (const lead of readyLeads) {
+        const attemptNum = (lead.attempts || 0) + 1; // Next attempt number
+        leadsByAttempt.set(attemptNum, (leadsByAttempt.get(attemptNum) || 0) + 1);
+      }
+
+      // Convert to sorted array for logging
+      const attemptDistribution: Record<string, number> = {};
+      Array.from(leadsByAttempt.keys())
+        .sort((a, b) => a - b)
+        .forEach((attemptNum) => {
+          attemptDistribution[`attempt_${attemptNum}`] = leadsByAttempt.get(attemptNum) || 0;
+        });
+
+      logger.info("Redial queue ready leads identified", {
         ready_to_dial: readyLeads.length,
+        breakdown: {
+          total: allRecords.length,
+          today_only: todayRecords.length,
+          favorable_status: favorableRecords.length,
+          under_max_attempts: underMaxAttempts.length,
+          time_ready: readyLeads.length,
+        },
+        attempt_distribution: attemptDistribution,
       });
 
       if (readyLeads.length === 0) {
+        logger.debug("No leads ready for redial at this time");
         return;
       }
 
@@ -479,35 +603,75 @@ class RedialQueueService {
       const { CallStateManager } = await import("./callStateManager");
 
       // Process leads sequentially to respect rate limits
+      let processedCount = 0;
+      let skippedCount = 0;
+      let errorCount = 0;
+
       for (const lead of readyLeads) {
         try {
-          // Check if there's already an active call to this phone number
+          // Null safety checks before processing
+          if (!lead || !lead.phone_number || !lead.lead_id) {
+            logger.error("Invalid lead record, skipping", { lead });
+            skippedCount++;
+            continue;
+          }
+
+          // PRE-CALL SAFETY CHECK #1: Verify record still under max attempts
+          if (lead.attempts >= this.queueConfig.max_redial_attempts) {
+            logger.warn("Lead reached max attempts since filtering, skipping", {
+              lead_id: lead.lead_id,
+              phone: lead.phone_number,
+              attempts: lead.attempts,
+              max: this.queueConfig.max_redial_attempts,
+            });
+            lead.status = "max_attempts";
+            await this.saveRecords();
+            skippedCount++;
+            continue;
+          }
+
+          // PRE-CALL SAFETY CHECK #2: Check for active/pending calls to this number
           const activeCalls = CallStateManager.getAllPendingCalls();
           const activeCallToNumber = activeCalls.find(
             (call) => call.phone_number === lead.phone_number && call.status === "pending"
           );
 
           if (activeCallToNumber) {
-            logger.info("Skipping redial - active call in progress", {
+            logger.info("SAFETY: Skipping redial - active/pending call detected", {
               lead_id: lead.lead_id,
               phone: lead.phone_number,
               active_call_id: activeCallToNumber.call_id,
-              attempt: lead.attempts + 1,
+              next_attempt: lead.attempts + 1,
             });
 
-            // Push redial ahead by 5 minutes
+            // Push redial ahead by 5 minutes to avoid conflict
             const pushAheadMinutes = 5;
             lead.next_redial_timestamp = now + pushAheadMinutes * 60 * 1000;
             lead.updated_at = now;
             await this.saveRecords();
+            skippedCount++;
             continue; // Skip to next lead
           }
 
-          logger.info("Redialing lead", {
+          // PRE-CALL SAFETY CHECK #3: Verify status is still favorable
+          if (lead.status !== "pending" && lead.status !== "rescheduled") {
+            logger.warn("Lead status changed since filtering, skipping", {
+              lead_id: lead.lead_id,
+              phone: lead.phone_number,
+              status: lead.status,
+            });
+            skippedCount++;
+            continue;
+          }
+
+          // ALL SAFETY CHECKS PASSED - PROCEED WITH CALL
+          logger.info("CALLING: All safety checks passed, initiating redial", {
             lead_id: lead.lead_id,
             phone: lead.phone_number,
-            attempt: lead.attempts + 1,
+            attempt_number: lead.attempts + 1,
+            max_attempts: this.queueConfig.max_redial_attempts,
             last_outcome: lead.last_outcome,
+            time_since_last_call: Math.floor((now - lead.last_call_timestamp) / 60000) + " minutes",
           });
 
           // Make the call
@@ -521,30 +685,66 @@ class RedialQueueService {
             status: lead.last_outcome, // Pass last outcome as status
           });
 
-          logger.info("Redial call initiated", {
+          logger.info("CALL INITIATED: Redial successful", {
             lead_id: lead.lead_id,
             phone: lead.phone_number,
             call_id: result.call_id,
             success: result.success,
+            attempt_number: lead.attempts + 1,
           });
+
+          processedCount++;
 
           // Note: The webhook will update the record when call completes
+          // Do NOT update attempts here - let webhook handle it to prevent double-counting
+
         } catch (error: any) {
-          logger.error("Failed to redial lead", {
+          errorCount++;
+          logger.error("ERROR: Failed to redial lead", {
             lead_id: lead.lead_id,
             phone: lead.phone_number,
+            attempt_number: lead.attempts + 1,
             error: error.message,
+            stack: error.stack,
           });
 
-          // Update record to retry later using progressive interval
-          const retryIntervalMinutes = this.getProgressiveInterval(lead.attempts + 1);
-          lead.next_redial_timestamp = now + retryIntervalMinutes * 60 * 1000;
-          await this.saveRecords();
+          // Safe error recovery: Schedule retry with progressive interval
+          try {
+            const retryIntervalMinutes = this.getProgressiveInterval(lead.attempts + 1);
+            const retryIntervalMs = retryIntervalMinutes === 0
+              ? 2 * 60 * 1000 // Minimum 2 minutes
+              : retryIntervalMinutes * 60 * 1000;
+
+            lead.next_redial_timestamp = now + retryIntervalMs;
+            lead.updated_at = now;
+            await this.saveRecords();
+
+            logger.info("Scheduled retry after error", {
+              lead_id: lead.lead_id,
+              phone: lead.phone_number,
+              retry_in_minutes: retryIntervalMinutes || 2,
+            });
+          } catch (saveError: any) {
+            logger.error("Failed to save retry schedule", {
+              lead_id: lead.lead_id,
+              error: saveError.message,
+            });
+          }
         }
       }
+
+      // Final summary
+      logger.info("Redial queue processing completed", {
+        total_ready: readyLeads.length,
+        calls_made: processedCount,
+        skipped: skippedCount,
+        errors: errorCount,
+      });
+
     } catch (error: any) {
-      logger.error("Error processing redial queue", {
+      logger.error("CRITICAL: Error processing redial queue", {
         error: error.message,
+        stack: error.stack,
       });
     } finally {
       this.isProcessing = false;

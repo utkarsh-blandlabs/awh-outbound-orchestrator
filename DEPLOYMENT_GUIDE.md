@@ -25,6 +25,11 @@ This guide provides step-by-step instructions to deploy the latest code changes 
 - `REDIAL_PROGRESSIVE_INTERVALS`: Comma-separated list of intervals in minutes
 - `REDIAL_MAX_ATTEMPTS`: Maximum number of redial attempts
 
+### 4. **Fixed Chrome URL Authentication** ✅
+- Admin endpoints now accept API key via `?key=...` query parameter
+- Previously only worked with `X-API-Key` header
+- Now works directly in Chrome browser URLs!
+
 ---
 
 ## Pre-Deployment Checklist

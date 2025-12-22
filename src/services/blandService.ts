@@ -8,6 +8,7 @@ import { config } from "../config";
 import { logger } from "../utils/logger";
 import { retry, isRetryableHttpError } from "../utils/retry";
 import { blandRateLimiter } from "../utils/rateLimiter";
+import { smsTrackerService } from "./smsTrackerService";
 import {
   BlandOutboundCallRequest,
   BlandOutboundCallResponse,
@@ -71,11 +72,24 @@ class BlandService {
 
     // For voicemail and SMS, replace placeholders with actual values
     // Bland doesn't have access to request_data in voicemail/SMS context
+    // Format callback number for voicemail: (561) 956-5858
+    const callbackNumber = config.bland.smsFrom || config.bland.from || "";
+    const formattedCallback = callbackNumber
+      ? callbackNumber.replace(/(\d{3})(\d{3})(\d{4})/, "($1) $2-$3")
+      : "";
+
     const voicemailMessage = config.bland.voicemailMessage
       ? config.bland.voicemailMessage
           .replace(/\{\{first_name\}\}/g, payload.firstName)
           .replace(/\{\{last_name\}\}/g, payload.lastName)
       : "";
+
+    // Add callback number to voicemail if not already included
+    const voicemailWithCallback = voicemailMessage && formattedCallback
+      ? (voicemailMessage.includes(formattedCallback)
+          ? voicemailMessage
+          : `${voicemailMessage} You can reach us at ${formattedCallback}.`)
+      : voicemailMessage;
 
     const smsMessage = config.bland.smsMessage
       ? config.bland.smsMessage
@@ -83,23 +97,36 @@ class BlandService {
           .replace(/\{\{last_name\}\}/g, payload.lastName)
       : "";
 
+    // Check if we can send SMS (limit 1-2 per day per number)
+    const canSendSms = smsTrackerService.canSendSms(payload.phoneNumber);
+    const shouldIncludeSms = config.bland.smsEnabled &&
+      config.bland.smsFrom &&
+      smsMessage &&
+      canSendSms;
+
+    if (config.bland.smsEnabled && smsMessage && !canSendSms) {
+      logger.info("SMS limit reached for today, voicemail only", {
+        phone: payload.phoneNumber,
+        sms_count: smsTrackerService.getSmsCount(payload.phoneNumber),
+        max: smsTrackerService.getConfig().max_sms_per_day,
+      });
+    }
+
     // Build voicemail object following Bland API v1 format with nested SMS
-    const voicemailConfig = voicemailMessage
+    const voicemailConfig = voicemailWithCallback
       ? {
-          message: voicemailMessage,
+          message: voicemailWithCallback,
           action: (config.bland.voicemailAction || "leave_message") as
             | "leave_message"
             | "hangup",
-          // Include SMS if enabled (nested within voicemail object)
-          ...(config.bland.smsEnabled &&
-            config.bland.smsFrom &&
-            smsMessage && {
-              sms: {
-                to: payload.phoneNumber,
-                from: config.bland.smsFrom,
-                message: smsMessage,
-              },
-            }),
+          // Include SMS if enabled and under daily limit (nested within voicemail object)
+          ...(shouldIncludeSms && {
+            sms: {
+              to: payload.phoneNumber,
+              from: config.bland.smsFrom,
+              message: smsMessage,
+            },
+          }),
           // IMPORTANT: Set to true for LLM-based sensitive voicemail detection
           sensitive: config.bland.sensitiveVoicemailDetection,
         }
@@ -163,6 +190,11 @@ class BlandService {
         call_id: response.call_id,
         status: response.status,
       });
+
+      // Record SMS sent if it was included in the request
+      if (shouldIncludeSms) {
+        await smsTrackerService.recordSmsSent(payload.phoneNumber);
+      }
 
       return {
         call_id: response.call_id,
