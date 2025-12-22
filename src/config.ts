@@ -44,6 +44,11 @@ export const config = {
     sensitiveVoicemailDetection:
       process.env["BLAND_SENSITIVE_VOICEMAIL_DETECTION"] === "true",
 
+    // SMS settings (sent with voicemail)
+    smsEnabled: process.env["BLAND_SMS_ENABLED"] === "true",
+    smsFrom: process.env["BLAND_SMS_FROM"] || "",
+    smsMessage: process.env["BLAND_SMS_MESSAGE"] || "",
+
     // Dynamic templates
     taskTemplate: process.env["BLAND_TASK_TEMPLATE"] || "",
     firstSentenceTemplate: process.env["BLAND_FIRST_SENTENCE_TEMPLATE"] || "",
