@@ -30,7 +30,8 @@ interface RedialRecord {
 
 interface RedialQueueConfig {
   enabled: boolean;
-  redial_interval_minutes: number; // Time between redial attempts
+  redial_interval_minutes: number; // DEPRECATED - use progressive_intervals instead
+  progressive_intervals: number[]; // Progressive intervals: [10, 30, 40, 60] minutes
   max_redial_attempts: number; // Max redial attempts per lead
   success_outcomes: string[]; // Outcomes that stop redialing
   retention_days: number; // Keep files for X days
@@ -51,13 +52,22 @@ class RedialQueueService {
     this.currentMonth = this.getCurrentMonthEST();
 
     // Load config from environment variables
+    // Default: 0,0,5,10,30,60,120 (matches Fronter dialing behavior)
+    // 2nd call: INSTANT, 3rd: INSTANT, 4th: 5min, 5th: 10min, 6th: 30min, 7th: 1hr, 8th: 2hr
+    const progressiveIntervalsStr = process.env["REDIAL_PROGRESSIVE_INTERVALS"] || "0,0,5,10,30,60,120";
+    const progressiveIntervals = progressiveIntervalsStr
+      .split(",")
+      .map((s) => parseInt(s.trim()))
+      .filter((n) => !isNaN(n));
+
     this.queueConfig = {
       enabled: process.env["REDIAL_QUEUE_ENABLED"] === "true",
       redial_interval_minutes: parseInt(
         process.env["REDIAL_INTERVAL_MINUTES"] || "30"
       ),
+      progressive_intervals: progressiveIntervals.length > 0 ? progressiveIntervals : [0, 0, 5, 10, 30, 60, 120],
       max_redial_attempts: parseInt(
-        process.env["REDIAL_MAX_ATTEMPTS"] || "4"
+        process.env["REDIAL_MAX_ATTEMPTS"] || "8"
       ),
       success_outcomes: (
         process.env["REDIAL_SUCCESS_OUTCOMES"] ||
@@ -82,10 +92,26 @@ class RedialQueueService {
 
     logger.info("Redial queue service initialized", {
       enabled: this.queueConfig.enabled,
-      redial_interval: this.queueConfig.redial_interval_minutes,
+      progressive_intervals: this.queueConfig.progressive_intervals,
       max_attempts: this.queueConfig.max_redial_attempts,
       success_outcomes: this.queueConfig.success_outcomes,
     });
+  }
+
+  /**
+   * Get progressive interval for specific attempt number
+   * Default cadence (Fronter behavior):
+   * 2nd call: 0 min (INSTANT), 3rd: 0 min (INSTANT), 4th: 5 min, 5th: 10 min,
+   * 6th: 30 min, 7th: 60 min (1hr), 8th: 120 min (2hr)
+   */
+  private getProgressiveInterval(attemptNumber: number): number {
+    const intervals = this.queueConfig.progressive_intervals;
+    const index = attemptNumber - 1; // Convert to 0-based index
+
+    if (index < 0) return intervals[0] || 0;
+    if (index >= intervals.length) return intervals[intervals.length - 1] || 120;
+
+    return intervals[index] || 30; // Fallback to 30 if undefined
   }
 
   private ensureDirectories(): void {
@@ -280,14 +306,15 @@ class RedialQueueService {
       existing.last_call_id = callId;
       existing.updated_at = now;
 
-      // Calculate next redial time
+      // Calculate next redial time using progressive intervals
       if (scheduledCallbackTime) {
         existing.next_redial_timestamp = scheduledCallbackTime;
         existing.scheduled_callback_time = scheduledCallbackTime;
         existing.status = "rescheduled";
       } else {
-        existing.next_redial_timestamp =
-          now + this.queueConfig.redial_interval_minutes * 60 * 1000;
+        // Use progressive interval based on attempt number
+        const intervalMinutes = this.getProgressiveInterval(existing.attempts);
+        existing.next_redial_timestamp = now + intervalMinutes * 60 * 1000;
         existing.status = "pending";
       }
 
@@ -303,9 +330,11 @@ class RedialQueueService {
         max: this.queueConfig.max_redial_attempts,
         status: existing.status,
         next_redial: new Date(existing.next_redial_timestamp).toISOString(),
+        next_interval_minutes: this.getProgressiveInterval(existing.attempts),
       });
     } else {
-      // Create new record
+      // Create new record with progressive interval for first attempt
+      const firstIntervalMinutes = this.getProgressiveInterval(1); // 10 minutes
       const newRecord: RedialRecord = {
         lead_id: leadId,
         phone_number: phoneNumber,
@@ -316,7 +345,7 @@ class RedialQueueService {
         attempts: 1,
         last_call_timestamp: now,
         next_redial_timestamp: scheduledCallbackTime ||
-          now + this.queueConfig.redial_interval_minutes * 60 * 1000,
+          now + firstIntervalMinutes * 60 * 1000,
         scheduled_callback_time: scheduledCallbackTime,
         outcomes: [outcome],
         last_outcome: outcome,
@@ -333,6 +362,7 @@ class RedialQueueService {
         phone: phoneNumber,
         outcome,
         next_redial: new Date(newRecord.next_redial_timestamp).toISOString(),
+        next_interval_minutes: firstIntervalMinutes,
       });
     }
 
@@ -444,12 +474,35 @@ class RedialQueueService {
         return;
       }
 
-      // Import orchestrator dynamically to avoid circular dependency
+      // Import orchestrator and CallStateManager dynamically to avoid circular dependency
       const { handleAwhOutbound } = await import("../logic/awhOrchestrator");
+      const { CallStateManager } = await import("./callStateManager");
 
       // Process leads sequentially to respect rate limits
       for (const lead of readyLeads) {
         try {
+          // Check if there's already an active call to this phone number
+          const activeCalls = CallStateManager.getAllPendingCalls();
+          const activeCallToNumber = activeCalls.find(
+            (call) => call.phone_number === lead.phone_number && call.status === "pending"
+          );
+
+          if (activeCallToNumber) {
+            logger.info("Skipping redial - active call in progress", {
+              lead_id: lead.lead_id,
+              phone: lead.phone_number,
+              active_call_id: activeCallToNumber.call_id,
+              attempt: lead.attempts + 1,
+            });
+
+            // Push redial ahead by 5 minutes
+            const pushAheadMinutes = 5;
+            lead.next_redial_timestamp = now + pushAheadMinutes * 60 * 1000;
+            lead.updated_at = now;
+            await this.saveRecords();
+            continue; // Skip to next lead
+          }
+
           logger.info("Redialing lead", {
             lead_id: lead.lead_id,
             phone: lead.phone_number,
@@ -483,9 +536,9 @@ class RedialQueueService {
             error: error.message,
           });
 
-          // Update record to retry later
-          lead.next_redial_timestamp =
-            now + this.queueConfig.redial_interval_minutes * 60 * 1000;
+          // Update record to retry later using progressive interval
+          const retryIntervalMinutes = this.getProgressiveInterval(lead.attempts + 1);
+          lead.next_redial_timestamp = now + retryIntervalMinutes * 60 * 1000;
           await this.saveRecords();
         }
       }
