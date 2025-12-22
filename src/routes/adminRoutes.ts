@@ -1117,16 +1117,73 @@ router.get("/am-tracker/stats", (req: Request, res: Response) => {
 
 /**
  * GET /api/admin/am-tracker/records
- * Get all answering machine tracker records (for debugging)
+ * Get all answering machine tracker records with filtering
+ * Query params:
+ *   - filter: "all" | "new" | "max" | "recent"
+ *   - minutes: number (for "new" and "recent" filters, default 60)
+ *   - sort: "newest" | "oldest" | "most_attempts"
  */
 router.get("/am-tracker/records", (req: Request, res: Response) => {
   try {
     const records = answeringMachineTracker.getAllRecords();
+    const config = answeringMachineTracker.getConfig();
+
+    // Query parameters
+    const filter = (req.query["filter"] as string) || "all";
+    const minutes = parseInt((req.query["minutes"] as string) || "60");
+    const sort = (req.query["sort"] as string) || "newest";
+
+    let filteredRecords = [...records];
+    const now = Date.now();
+
+    // Apply filters
+    if (filter === "new") {
+      // Leads added in last X minutes
+      const cutoff = now - (minutes * 60 * 1000);
+      filteredRecords = filteredRecords.filter(
+        r => r.first_attempt_timestamp >= cutoff
+      );
+    } else if (filter === "recent") {
+      // Leads called in last X minutes
+      const cutoff = now - (minutes * 60 * 1000);
+      filteredRecords = filteredRecords.filter(
+        r => r.last_attempt_timestamp >= cutoff
+      );
+    } else if (filter === "max") {
+      // Leads at max attempts
+      filteredRecords = filteredRecords.filter(
+        r => r.attempts >= config.max_attempts_per_lead
+      );
+    }
+
+    // Apply sorting
+    if (sort === "newest") {
+      filteredRecords.sort((a, b) => b.first_attempt_timestamp - a.first_attempt_timestamp);
+    } else if (sort === "oldest") {
+      filteredRecords.sort((a, b) => a.first_attempt_timestamp - b.first_attempt_timestamp);
+    } else if (sort === "most_attempts") {
+      filteredRecords.sort((a, b) => b.attempts - a.attempts);
+    }
+
+    // Enrich records with human-readable timestamps
+    const enrichedRecords = filteredRecords.map(r => ({
+      ...r,
+      first_attempt_iso: new Date(r.first_attempt_timestamp).toISOString(),
+      last_attempt_iso: new Date(r.last_attempt_timestamp).toISOString(),
+      minutes_since_first: Math.floor((now - r.first_attempt_timestamp) / 60000),
+      minutes_since_last: Math.floor((now - r.last_attempt_timestamp) / 60000),
+      at_max_attempts: r.attempts >= config.max_attempts_per_lead,
+    }));
 
     res.json({
       success: true,
+      timestamp: new Date().toISOString(),
+      filter: filter,
+      sort: sort,
       total: records.length,
-      records,
+      filtered: enrichedRecords.length,
+      max_attempts: config.max_attempts_per_lead,
+      records: enrichedRecords,
     });
   } catch (error: any) {
     logger.error("Error fetching AM tracker records", { error: error.message });
