@@ -44,6 +44,73 @@ function authenticateAdmin(req: Request, res: Response, next: Function) {
 router.use(authenticateAdmin);
 
 /**
+ * GET /api/admin/config
+ * Returns current system configuration (without sensitive data)
+ */
+router.get("/config", (req: Request, res: Response) => {
+  try {
+    const { config } = require("../config");
+
+    // Build config response (excluding sensitive data like API keys)
+    const configResponse = {
+      server: {
+        port: config.port,
+        nodeEnv: config.nodeEnv,
+        logLevel: config.logLevel,
+      },
+      bland: {
+        baseUrl: config.bland.baseUrl,
+        pathwayId: config.bland.pathwayId,
+        startNodeId: config.bland.startNodeId,
+        from: config.bland.from,
+        transferPhoneNumber: config.bland.transferPhoneNumber,
+        voiceId: config.bland.voiceId,
+        maxDuration: config.bland.maxDuration,
+        // Call behavior
+        answeringMachineDetection: config.bland.answeringMachineDetection,
+        waitForGreeting: config.bland.waitForGreeting,
+        blockInterruptions: config.bland.blockInterruptions,
+        record: config.bland.record,
+        // Voicemail settings
+        voicemailMessage: config.bland.voicemailMessage,
+        voicemailAction: config.bland.voicemailAction,
+        answeredByEnabled: config.bland.answeredByEnabled,
+        sensitiveVoicemailDetection: config.bland.sensitiveVoicemailDetection,
+        // SMS settings (NEW - Critical for D-day!)
+        smsEnabled: config.bland.smsEnabled,
+        smsFrom: config.bland.smsFrom,
+        smsMessage: config.bland.smsMessage,
+        // Templates
+        taskTemplate: config.bland.taskTemplate,
+        firstSentenceTemplate: config.bland.firstSentenceTemplate,
+        webhookUrl: config.bland.webhookUrl,
+      },
+      convoso: {
+        baseUrl: config.convoso.baseUrl,
+        polling: config.convoso.polling,
+      },
+      retry: config.retry,
+      rateLimiter: config.rateLimiter,
+      answeringMachineTracker: config.answeringMachineTracker,
+      queueProcessor: config.queueProcessor,
+      cache: config.cache,
+    };
+
+    res.json({
+      success: true,
+      timestamp: new Date().toISOString(),
+      config: configResponse,
+    });
+  } catch (error: any) {
+    logger.error("Error fetching config", { error: error.message });
+    res.status(500).json({
+      success: false,
+      error: error.message,
+    });
+  }
+});
+
+/**
  * GET /api/admin/calls/active
  * Returns all active/pending calls from CallStateManager
  */
