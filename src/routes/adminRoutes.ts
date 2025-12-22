@@ -19,7 +19,8 @@ const router = Router();
  * In production, use proper JWT or OAuth
  */
 function authenticateAdmin(req: Request, res: Response, next: Function) {
-  const apiKey = req.headers["x-api-key"] || req.query["api_key"];
+  // Accept API key from header or query params (both "key" and "api_key" for convenience)
+  const apiKey = req.headers["x-api-key"] || req.query["api_key"] || req.query["key"];
 
   // Check API key (set in environment variables)
   if (!process.env["ADMIN_API_KEY"]) {

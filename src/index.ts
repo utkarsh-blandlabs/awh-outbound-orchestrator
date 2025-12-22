@@ -9,6 +9,7 @@ import awhWebhookRouter from "./routes/awhWebhook";
 import blandWebhookRouter from "./routes/blandWebhook";
 import callbackWebhookRouter from "./routes/callbackWebhook";
 import adminRouter from "./routes/adminRoutes";
+import { versionService } from "./services/versionService";
 
 // Import services (they auto-start in their constructors)
 import "./services/queueProcessorService";
@@ -53,9 +54,15 @@ app.use((req: Request, res: Response, next: NextFunction) => {
 
 // Health check
 app.get("/health", (req: Request, res: Response) => {
+  const versionInfo = versionService.getVersionInfo();
+
   res.status(200).json({
     status: "ok",
     service: "awh-outbound-orchestrator",
+    version: versionInfo.version,
+    deployedAt: versionInfo.deployedAt,
+    environment: versionInfo.environment,
+    uptime: versionInfo.uptime,
     timestamp: new Date().toISOString(),
     architecture: "async",
   });
