@@ -69,23 +69,39 @@ class BlandService {
     const task = config.bland.taskTemplate || undefined;
     const firstSentence = config.bland.firstSentenceTemplate || undefined;
 
-    // For voicemail, we still replace placeholders because Bland doesn't
-    // have access to request_data in voicemail context
+    // For voicemail and SMS, replace placeholders with actual values
+    // Bland doesn't have access to request_data in voicemail/SMS context
     const voicemailMessage = config.bland.voicemailMessage
       ? config.bland.voicemailMessage
           .replace(/\{\{first_name\}\}/g, payload.firstName)
           .replace(/\{\{last_name\}\}/g, payload.lastName)
       : "";
 
+    const smsMessage = config.bland.smsMessage
+      ? config.bland.smsMessage
+          .replace(/\{\{first_name\}\}/g, payload.firstName)
+          .replace(/\{\{last_name\}\}/g, payload.lastName)
+      : "";
 
-    // Build voicemail object following Bland API v1 format
+    // Build voicemail object following Bland API v1 format with nested SMS
     const voicemailConfig = voicemailMessage
       ? {
           message: voicemailMessage,
           action: (config.bland.voicemailAction || "leave_message") as
             | "leave_message"
             | "hangup",
-          sensitive: config.bland.sensitiveVoicemailDetection || true,
+          // Include SMS if enabled (nested within voicemail object)
+          ...(config.bland.smsEnabled &&
+            config.bland.smsFrom &&
+            smsMessage && {
+              sms: {
+                to: payload.phoneNumber,
+                from: config.bland.smsFrom,
+                message: smsMessage,
+              },
+            }),
+          // IMPORTANT: Set to true for LLM-based sensitive voicemail detection
+          sensitive: config.bland.sensitiveVoicemailDetection,
         }
       : undefined;
 
