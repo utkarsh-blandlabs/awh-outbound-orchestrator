@@ -149,7 +149,8 @@ export async function handleAwhOutbound(
       payload.list_id,
       payload.phone_number,
       payload.first_name,
-      payload.last_name
+      payload.last_name,
+      payload.state
     );
     currentStage = OrchestrationStage.WEBHOOK_REGISTERED;
 

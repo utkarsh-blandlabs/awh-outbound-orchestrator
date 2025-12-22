@@ -1525,4 +1525,445 @@ router.post("/queue-processor/disable", (req: Request, res: Response) => {
   }
 });
 
+// ============================================================================
+// Redial Queue Endpoints
+// ============================================================================
+
+/**
+ * GET /api/admin/redial-queue/status
+ * Get redial queue processor status
+ */
+router.get("/redial-queue/status", (req: Request, res: Response) => {
+  try {
+    const { redialQueueService } = require("../services/redialQueueService");
+    const status = redialQueueService.getStatus();
+    const stats = redialQueueService.getStats();
+
+    res.json({
+      success: true,
+      timestamp: new Date().toISOString(),
+      status,
+      stats,
+    });
+  } catch (error: any) {
+    logger.error("Error fetching redial queue status", {
+      error: error.message,
+    });
+    res.status(500).json({
+      success: false,
+      error: error.message,
+    });
+  }
+});
+
+/**
+ * GET /api/admin/redial-queue/config
+ * Get redial queue configuration
+ */
+router.get("/redial-queue/config", (req: Request, res: Response) => {
+  try {
+    const { redialQueueService } = require("../services/redialQueueService");
+    const config = redialQueueService.getConfig();
+
+    res.json({
+      success: true,
+      config,
+    });
+  } catch (error: any) {
+    logger.error("Error fetching redial queue config", {
+      error: error.message,
+    });
+    res.status(500).json({
+      success: false,
+      error: error.message,
+    });
+  }
+});
+
+/**
+ * PUT /api/admin/redial-queue/config
+ * Update redial queue configuration
+ */
+router.put("/redial-queue/config", (req: Request, res: Response) => {
+  try {
+    const { redialQueueService } = require("../services/redialQueueService");
+    const updates = req.body;
+    const config = redialQueueService.updateConfig(updates);
+
+    logger.info("Redial queue config updated via API", {
+      updates,
+      triggered_by: (req.headers["x-user"] as string) || "unknown",
+    });
+
+    res.json({
+      success: true,
+      message: "Configuration updated successfully",
+      config,
+      status: redialQueueService.getStatus(),
+    });
+  } catch (error: any) {
+    logger.error("Error updating redial queue config", {
+      error: error.message,
+    });
+    res.status(500).json({
+      success: false,
+      error: error.message,
+    });
+  }
+});
+
+/**
+ * GET /api/admin/redial-queue/records
+ * Get redial queue records with filtering
+ * Query params:
+ *   - status: "pending" | "rescheduled" | "completed" | "max_attempts" | "paused"
+ *   - ready: boolean (only ready to dial)
+ *   - limit: number
+ *   - offset: number
+ */
+router.get("/redial-queue/records", (req: Request, res: Response) => {
+  try {
+    const { redialQueueService } = require("../services/redialQueueService");
+
+    const filter: any = {};
+    if (req.query["status"]) filter.status = req.query["status"] as string;
+    if (req.query["ready"]) filter.ready = req.query["ready"] === "true";
+    if (req.query["limit"])
+      filter.limit = parseInt(req.query["limit"] as string);
+    if (req.query["offset"])
+      filter.offset = parseInt(req.query["offset"] as string);
+
+    const records = redialQueueService.getAllRecords(filter);
+    const stats = redialQueueService.getStats();
+
+    // Enrich records with human-readable data
+    const now = Date.now();
+    const enrichedRecords = records.map((r: any) => ({
+      ...r,
+      last_call_iso: new Date(r.last_call_timestamp).toISOString(),
+      next_redial_iso: new Date(r.next_redial_timestamp).toISOString(),
+      created_at_iso: new Date(r.created_at).toISOString(),
+      minutes_until_next_redial: Math.max(
+        0,
+        Math.floor((r.next_redial_timestamp - now) / 60000)
+      ),
+      is_ready: r.next_redial_timestamp <= now && r.attempts < stats.max_attempts,
+    }));
+
+    res.json({
+      success: true,
+      timestamp: new Date().toISOString(),
+      filter,
+      total: stats.total_records,
+      filtered: enrichedRecords.length,
+      records: enrichedRecords,
+    });
+  } catch (error: any) {
+    logger.error("Error fetching redial queue records", {
+      error: error.message,
+    });
+    res.status(500).json({
+      success: false,
+      error: error.message,
+    });
+  }
+});
+
+/**
+ * POST /api/admin/redial-queue/start
+ * Start redial queue processor
+ */
+router.post("/redial-queue/start", (req: Request, res: Response) => {
+  try {
+    const { redialQueueService } = require("../services/redialQueueService");
+    redialQueueService.startProcessor();
+
+    logger.info("Redial queue processor started via API", {
+      triggered_by: (req.headers["x-user"] as string) || "unknown",
+    });
+
+    res.json({
+      success: true,
+      message: "Redial queue processor started",
+      status: redialQueueService.getStatus(),
+    });
+  } catch (error: any) {
+    logger.error("Error starting redial queue processor", {
+      error: error.message,
+    });
+    res.status(500).json({
+      success: false,
+      error: error.message,
+    });
+  }
+});
+
+/**
+ * POST /api/admin/redial-queue/stop
+ * Stop redial queue processor
+ */
+router.post("/redial-queue/stop", (req: Request, res: Response) => {
+  try {
+    const { redialQueueService } = require("../services/redialQueueService");
+    redialQueueService.stopProcessor();
+
+    logger.info("Redial queue processor stopped via API", {
+      triggered_by: (req.headers["x-user"] as string) || "unknown",
+    });
+
+    res.json({
+      success: true,
+      message: "Redial queue processor stopped",
+      status: redialQueueService.getStatus(),
+    });
+  } catch (error: any) {
+    logger.error("Error stopping redial queue processor", {
+      error: error.message,
+    });
+    res.status(500).json({
+      success: false,
+      error: error.message,
+    });
+  }
+});
+
+/**
+ * POST /api/admin/redial-queue/process
+ * Manually trigger queue processing
+ */
+router.post("/redial-queue/process", async (req: Request, res: Response) => {
+  try {
+    const { redialQueueService } = require("../services/redialQueueService");
+    const result = await redialQueueService.triggerProcessing();
+
+    logger.info("Redial queue processing triggered via API", {
+      triggered_by: (req.headers["x-user"] as string) || "unknown",
+    });
+
+    res.json({
+      success: result.success,
+      message: result.message,
+      status: redialQueueService.getStatus(),
+    });
+  } catch (error: any) {
+    logger.error("Error triggering redial queue processing", {
+      error: error.message,
+    });
+    res.status(500).json({
+      success: false,
+      error: error.message,
+    });
+  }
+});
+
+/**
+ * POST /api/admin/redial-queue/enable
+ * Enable redial queue (auto-start processor)
+ */
+router.post("/redial-queue/enable", (req: Request, res: Response) => {
+  try {
+    const { redialQueueService } = require("../services/redialQueueService");
+    redialQueueService.updateConfig({ enabled: true });
+
+    logger.info("Redial queue enabled via API", {
+      triggered_by: (req.headers["x-user"] as string) || "unknown",
+    });
+
+    res.json({
+      success: true,
+      message: "Redial queue enabled",
+      config: redialQueueService.getConfig(),
+      status: redialQueueService.getStatus(),
+    });
+  } catch (error: any) {
+    logger.error("Error enabling redial queue", { error: error.message });
+    res.status(500).json({
+      success: false,
+      error: error.message,
+    });
+  }
+});
+
+/**
+ * POST /api/admin/redial-queue/disable
+ * Disable redial queue (stop auto-processing)
+ */
+router.post("/redial-queue/disable", (req: Request, res: Response) => {
+  try {
+    const { redialQueueService } = require("../services/redialQueueService");
+    redialQueueService.updateConfig({ enabled: false });
+
+    logger.info("Redial queue disabled via API", {
+      triggered_by: (req.headers["x-user"] as string) || "unknown",
+    });
+
+    res.json({
+      success: true,
+      message: "Redial queue disabled",
+      config: redialQueueService.getConfig(),
+      status: redialQueueService.getStatus(),
+    });
+  } catch (error: any) {
+    logger.error("Error disabling redial queue", { error: error.message });
+    res.status(500).json({
+      success: false,
+      error: error.message,
+    });
+  }
+});
+
+/**
+ * DELETE /api/admin/redial-queue/lead/:lead_id
+ * Remove a lead from redial queue
+ * Query param: phone (required)
+ */
+router.delete("/redial-queue/lead/:lead_id", async (req: Request, res: Response) => {
+  try {
+    const { redialQueueService } = require("../services/redialQueueService");
+    const leadId = req.params["lead_id"];
+    const phone = req.query["phone"] as string;
+
+    if (!phone) {
+      return res.status(400).json({
+        success: false,
+        error: "Missing required query parameter: phone",
+      });
+    }
+
+    const deleted = await redialQueueService.removeLead(leadId, phone);
+
+    logger.info("Lead removed from redial queue via API", {
+      lead_id: leadId,
+      phone,
+      deleted,
+      triggered_by: (req.headers["x-user"] as string) || "unknown",
+    });
+
+    res.json({
+      success: deleted,
+      message: deleted ? "Lead removed from queue" : "Lead not found in queue",
+    });
+  } catch (error: any) {
+    logger.error("Error removing lead from redial queue", {
+      error: error.message,
+    });
+    res.status(500).json({
+      success: false,
+      error: error.message,
+    });
+  }
+});
+
+/**
+ * POST /api/admin/redial-queue/lead/:lead_id/pause
+ * Pause redialing for a lead
+ * Query param: phone (required)
+ */
+router.post("/redial-queue/lead/:lead_id/pause", async (req: Request, res: Response) => {
+  try {
+    const { redialQueueService } = require("../services/redialQueueService");
+    const leadId = req.params["lead_id"];
+    const phone = req.query["phone"] as string;
+
+    if (!phone) {
+      return res.status(400).json({
+        success: false,
+        error: "Missing required query parameter: phone",
+      });
+    }
+
+    const paused = await redialQueueService.pauseLead(leadId, phone);
+
+    logger.info("Lead paused in redial queue via API", {
+      lead_id: leadId,
+      phone,
+      paused,
+      triggered_by: (req.headers["x-user"] as string) || "unknown",
+    });
+
+    res.json({
+      success: paused,
+      message: paused ? "Lead paused" : "Lead not found in queue",
+    });
+  } catch (error: any) {
+    logger.error("Error pausing lead in redial queue", {
+      error: error.message,
+    });
+    res.status(500).json({
+      success: false,
+      error: error.message,
+    });
+  }
+});
+
+/**
+ * POST /api/admin/redial-queue/lead/:lead_id/resume
+ * Resume redialing for a paused lead
+ * Query param: phone (required)
+ */
+router.post("/redial-queue/lead/:lead_id/resume", async (req: Request, res: Response) => {
+  try {
+    const { redialQueueService } = require("../services/redialQueueService");
+    const leadId = req.params["lead_id"];
+    const phone = req.query["phone"] as string;
+
+    if (!phone) {
+      return res.status(400).json({
+        success: false,
+        error: "Missing required query parameter: phone",
+      });
+    }
+
+    const resumed = await redialQueueService.resumeLead(leadId, phone);
+
+    logger.info("Lead resumed in redial queue via API", {
+      lead_id: leadId,
+      phone,
+      resumed,
+      triggered_by: (req.headers["x-user"] as string) || "unknown",
+    });
+
+    res.json({
+      success: resumed,
+      message: resumed ? "Lead resumed" : "Lead not found or not paused",
+    });
+  } catch (error: any) {
+    logger.error("Error resuming lead in redial queue", {
+      error: error.message,
+    });
+    res.status(500).json({
+      success: false,
+      error: error.message,
+    });
+  }
+});
+
+/**
+ * POST /api/admin/redial-queue/cleanup
+ * Clean up old files (beyond retention period)
+ */
+router.post("/redial-queue/cleanup", async (req: Request, res: Response) => {
+  try {
+    const { redialQueueService } = require("../services/redialQueueService");
+    await redialQueueService.cleanupOldFiles();
+
+    logger.info("Redial queue cleanup triggered via API", {
+      triggered_by: (req.headers["x-user"] as string) || "unknown",
+    });
+
+    res.json({
+      success: true,
+      message: "Cleanup completed",
+    });
+  } catch (error: any) {
+    logger.error("Error during redial queue cleanup", {
+      error: error.message,
+    });
+    res.status(500).json({
+      success: false,
+      error: error.message,
+    });
+  }
+});
+
 export default router;
