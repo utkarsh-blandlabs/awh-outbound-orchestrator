@@ -5,6 +5,7 @@ import { convosoService } from "../services/convosoService";
 import { statisticsService } from "../services/statisticsService";
 import { dailyCallTracker } from "../services/dailyCallTrackerService";
 import { answeringMachineTracker } from "../services/answeringMachineTrackerService";
+import { redialQueueService } from "../services/redialQueueService";
 import { BlandTranscript, CallOutcome } from "../types/awh";
 
 const router = Router();
@@ -165,6 +166,25 @@ async function processCallCompletion(
       callState.phone_number,
       transcript.outcome,
       callState.call_id
+    );
+
+    // Add/update in redial queue (will handle success outcomes automatically)
+    // Extract scheduled callback time if present in transcript variables
+    const callbackRequestedAt = (transcript as any)["callback_requested_at"];
+    const scheduledCallbackTime = callbackRequestedAt
+      ? new Date(callbackRequestedAt).getTime()
+      : undefined;
+
+    await redialQueueService.addOrUpdateLead(
+      callState.lead_id,
+      callState.phone_number,
+      callState.list_id,
+      callState.first_name,
+      callState.last_name,
+      callState.state,
+      transcript.outcome,
+      callState.call_id,
+      scheduledCallbackTime
     );
 
     CallStateManager.completeCall(callState.call_id);

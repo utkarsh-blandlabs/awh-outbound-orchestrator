@@ -180,7 +180,8 @@ async function processCallback(payload: CallbackPayload, requestId: string): Pro
       payload.list_id || "",
       payload.phone_number,
       payload.first_name,
-      payload.last_name
+      payload.last_name,
+      payload.state || ""
     );
 
     logger.info("💾 STATE | Call state stored for webhook matching", {

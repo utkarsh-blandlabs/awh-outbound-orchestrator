@@ -9,6 +9,7 @@ interface PendingCall {
   phone_number: string;
   first_name: string;
   last_name: string;
+  state: string;
   created_at: number;
   status: "pending" | "completed" | "failed";
   error?: string;
@@ -24,7 +25,8 @@ class CallStateManagerClass {
     listId: string,
     phoneNumber: string,
     firstName: string,
-    lastName: string
+    lastName: string,
+    state: string
   ): void {
     const pendingCall: PendingCall = {
       call_id: callId,
@@ -34,6 +36,7 @@ class CallStateManagerClass {
       phone_number: phoneNumber,
       first_name: firstName,
       last_name: lastName,
+      state: state,
       created_at: Date.now(),
       status: "pending",
     };
