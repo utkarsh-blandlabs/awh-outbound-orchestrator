@@ -78,7 +78,14 @@ class DailyCallTrackerService {
   }
 
   private getTodayDate(): string {
-    return new Date().toISOString().split("T")[0] || ""; // YYYY-MM-DD
+    // Use EST timezone for date rotation (not UTC)
+    const formatter = new Intl.DateTimeFormat("en-CA", {
+      timeZone: "America/New_York",
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+    });
+    return formatter.format(new Date()); // Returns YYYY-MM-DD in EST
   }
 
   private getRecordFilePath(date: string): string {
@@ -452,9 +459,35 @@ class DailyCallTrackerService {
       attempt.duration = transcriptData.duration;
     }
 
-    // Clear active call
+    // CRITICAL FIX: For TRANSFERRED calls, DON'T clear active_call_id immediately
+    // The customer is still on the call with the transferred agent!
+    // Keep the line "busy" for a safety window to prevent duplicate calls
     if (record.active_call_id === callId) {
-      record.active_call_id = null;
+      if (outcome === CallOutcome.TRANSFERRED) {
+        // Set a delayed clear for transferred calls (30 minutes)
+        // This prevents duplicate calls while customer is talking to agent
+        const transferSafetyWindowMs = 30 * 60 * 1000; // 30 minutes
+        logger.info("Transfer detected - keeping line protected", {
+          phone: record.phone_number,
+          call_id: callId,
+          safety_window_minutes: 30,
+        });
+
+        setTimeout(() => {
+          // Re-check if this is still the active call before clearing
+          if (record.active_call_id === callId) {
+            record.active_call_id = null;
+            this.saveRecords();
+            logger.info("Transfer safety window expired - line released", {
+              phone: record.phone_number,
+              call_id: callId,
+            });
+          }
+        }, transferSafetyWindowMs);
+      } else {
+        // For non-transferred calls, clear immediately
+        record.active_call_id = null;
+      }
     }
 
     // Update final outcome
@@ -467,6 +500,7 @@ class DailyCallTrackerService {
       call_id: callId,
       outcome,
       answered_by: transcriptData.answered_by,
+      active_call_cleared: outcome !== CallOutcome.TRANSFERRED,
     });
   }
 

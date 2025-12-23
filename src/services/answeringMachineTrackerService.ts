@@ -72,12 +72,14 @@ class AnsweringMachineTrackerService {
    * Get current date in EST timezone (YYYY-MM-DD)
    */
   private getTodayDateEST(): string {
-    const now = new Date();
-    // Convert to EST (UTC-5)
-    const estOffset = -5 * 60; // EST is UTC-5
-    const utc = now.getTime() + now.getTimezoneOffset() * 60000;
-    const estTime = new Date(utc + estOffset * 60000);
-    return estTime.toISOString().split("T")[0] || "";
+    // Use proper EST timezone handling (handles daylight saving automatically)
+    const formatter = new Intl.DateTimeFormat("en-CA", {
+      timeZone: "America/New_York",
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+    });
+    return formatter.format(new Date()); // Returns YYYY-MM-DD in EST/EDT
   }
 
   /**
