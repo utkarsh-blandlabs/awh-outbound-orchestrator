@@ -88,7 +88,7 @@ class BlandService {
     const voicemailWithCallback = voicemailMessage && formattedCallback
       ? (voicemailMessage.includes(formattedCallback)
           ? voicemailMessage
-          : `${voicemailMessage} You can reach us at ${formattedCallback}.`)
+          : `${voicemailMessage} Call me at ${formattedCallback}.`)
       : voicemailMessage;
 
     const smsMessage = config.bland.smsMessage
