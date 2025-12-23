@@ -242,6 +242,9 @@ function parseTranscriptFromWebhook(raw: any): BlandTranscript {
 }
 
 function determineOutcome(raw: any): CallOutcome {
+  // CRITICAL: ONLY mark as TRANSFERRED if warm_transfer_call.state === "MERGED"
+  // This is the ONLY reliable indicator that customer actually connected to agent
+  // DO NOT trust qualification data, summary mentions, or tags - customer may hang up during hold music
   if (raw.warm_transfer_call && raw.warm_transfer_call.state === "MERGED") {
     return CallOutcome.TRANSFERRED;
   }
@@ -262,19 +265,11 @@ function determineOutcome(raw: any): CallOutcome {
       return CallOutcome.CALLBACK;
     }
 
-    const hasQualification = raw.variables?.customer_age && raw.variables?.plan_type;
-    const summaryLower = raw.summary?.toLowerCase() || "";
-    const hasTransferInSummary = summaryLower.includes("transfer") ||
-                                  summaryLower.includes("licensed agent") ||
-                                  summaryLower.includes("connect");
-
-    const qualificationTags = ["Age Confirmation", "Plan Type", "Identity Confirmation"];
-    const hasQualificationTags = qualificationTags.some(tag =>
-      raw.pathway_tags?.some((pt: any) => pt === tag || pt?.name === tag)
-    );
-
-    if (hasQualification || hasTransferInSummary || hasQualificationTags || answeredBy === "human") {
-      return CallOutcome.TRANSFERRED;
+    // If completed with human but NO successful transfer, mark as CONFUSED
+    // Customer may have qualified but hung up before/during transfer
+    // This is NOT a successful transfer - agent never spoke to customer
+    if (answeredBy === "human") {
+      return CallOutcome.CONFUSED;
     }
   }
 

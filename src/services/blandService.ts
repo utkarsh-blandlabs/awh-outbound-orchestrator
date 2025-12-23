@@ -356,7 +356,8 @@ class BlandService {
    * Based on status, answered_by, and other indicators
    */
   private determineOutcome(raw: any): CallOutcome {
-    // If there was a warm transfer, it was transferred
+    // CRITICAL: ONLY mark as TRANSFERRED if warm_transfer_call.state === "MERGED"
+    // This is the ONLY reliable indicator that customer actually connected to agent
     if (raw.warm_transfer_call && raw.warm_transfer_call.state === "MERGED") {
       return CallOutcome.TRANSFERRED;
     }
@@ -379,8 +380,9 @@ class BlandService {
       if (raw.variables?.callback_requested === true) {
         return CallOutcome.CALLBACK;
       }
-      // Default to transferred if completed with human
-      return CallOutcome.TRANSFERRED;
+      // If completed with human but NO successful transfer, mark as CONFUSED
+      // Customer may have qualified but hung up before/during transfer
+      return CallOutcome.CONFUSED;
     }
 
     // Check error status

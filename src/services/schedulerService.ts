@@ -16,6 +16,7 @@ interface ScheduleConfig {
     startTime: string; // "09:00" (24-hour format)
     endTime: string; // "17:00" (24-hour format)
   };
+  blackoutDates?: string[]; // Array of dates to exclude (YYYY-MM-DD format)
 }
 
 interface QueuedRequest {
@@ -127,6 +128,23 @@ class SchedulerService {
 
     try {
       const now = new Date();
+
+      // Check blackout dates first (YYYY-MM-DD format in configured timezone)
+      if (this.config.blackoutDates && this.config.blackoutDates.length > 0) {
+        const dateFormatter = new Intl.DateTimeFormat("en-CA", {
+          timeZone: this.config.timezone,
+          year: "numeric",
+          month: "2-digit",
+          day: "2-digit",
+        });
+        const currentDate = dateFormatter.format(now); // Returns YYYY-MM-DD
+
+        if (this.config.blackoutDates.includes(currentDate)) {
+          logger.debug("System inactive - blackout date", { date: currentDate });
+          return false;
+        }
+      }
+
       const options: Intl.DateTimeFormatOptions = {
         timeZone: this.config.timezone,
         hour: "2-digit",

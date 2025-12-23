@@ -125,22 +125,30 @@ class RedialQueueService {
    * Get current month in EST timezone (YYYY-MM)
    */
   private getCurrentMonthEST(): string {
-    const now = new Date();
-    const estOffset = -5 * 60; // EST is UTC-5
-    const utc = now.getTime() + now.getTimezoneOffset() * 60000;
-    const estTime = new Date(utc + estOffset * 60000);
-    return estTime.toISOString().substring(0, 7); // YYYY-MM
+    // Use proper EST timezone handling (handles daylight saving automatically)
+    const formatter = new Intl.DateTimeFormat("en-CA", {
+      timeZone: "America/New_York",
+      year: "numeric",
+      month: "2-digit",
+    });
+    const parts = formatter.formatToParts(new Date());
+    const year = parts.find(p => p.type === "year")?.value || "";
+    const month = parts.find(p => p.type === "month")?.value || "";
+    return `${year}-${month}`; // YYYY-MM
   }
 
   /**
    * Get current date in EST timezone (YYYY-MM-DD)
    */
   private getCurrentDateEST(): string {
-    const now = new Date();
-    const estOffset = -5 * 60; // EST is UTC-5
-    const utc = now.getTime() + now.getTimezoneOffset() * 60000;
-    const estTime = new Date(utc + estOffset * 60000);
-    return estTime.toISOString().substring(0, 10); // YYYY-MM-DD
+    // Use proper EST timezone handling (handles daylight saving automatically)
+    const formatter = new Intl.DateTimeFormat("en-CA", {
+      timeZone: "America/New_York",
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+    });
+    return formatter.format(new Date()); // Returns YYYY-MM-DD in EST/EDT
   }
 
   /**
@@ -516,7 +524,14 @@ class RedialQueueService {
       // Filter #1: Only records from today (created or updated today)
       const todayRecords = allRecords.filter((record) => {
         if (!record || !record.created_at) return false;
-        const recordDate = new Date(record.created_at).toISOString().substring(0, 10);
+        // Convert record timestamp to EST date for comparison
+        const formatter = new Intl.DateTimeFormat("en-CA", {
+          timeZone: "America/New_York",
+          year: "numeric",
+          month: "2-digit",
+          day: "2-digit",
+        });
+        const recordDate = formatter.format(new Date(record.created_at));
         return recordDate === todayDate;
       });
 
