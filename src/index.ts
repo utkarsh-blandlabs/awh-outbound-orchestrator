@@ -9,6 +9,7 @@ import awhWebhookRouter from "./routes/awhWebhook";
 import blandWebhookRouter from "./routes/blandWebhook";
 import callbackWebhookRouter from "./routes/callbackWebhook";
 import adminRouter from "./routes/adminRoutes";
+import blocklistRouter from "./routes/blocklistRoutes";
 import { versionService } from "./services/versionService";
 
 // Import services (they auto-start in their constructors)
@@ -75,6 +76,7 @@ app.use("/webhooks", callbackWebhookRouter);
 
 // Admin API routes (for Retool dashboard)
 app.use("/api/admin", adminRouter);
+app.use("/api/admin/blocklist", blocklistRouter);
 
 // 404 handler
 app.use((req: Request, res: Response) => {

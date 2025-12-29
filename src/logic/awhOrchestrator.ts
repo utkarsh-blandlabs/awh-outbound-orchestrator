@@ -5,6 +5,7 @@ import { CallStateManager } from "../services/callStateManager";
 import { schedulerService } from "../services/schedulerService";
 import { dailyCallTracker } from "../services/dailyCallTrackerService";
 import { answeringMachineTracker } from "../services/answeringMachineTrackerService";
+import { blocklistService } from "../services/blocklistService";
 import {
   ConvosoWebhookPayload,
   OrchestrationResult,
@@ -126,6 +127,33 @@ export async function handleAwhOutbound(
         error: protection.reason,
       };
     }
+  }
+
+  // CRITICAL: Check blocklist BEFORE calling Bland AI (to avoid wasting API calls)
+  // This checks dynamic flags for specific phone numbers, lead_ids, or other fields
+  const blocklistCheck = blocklistService.shouldBlock({
+    ...payload, // Include all payload fields for flexible blocking
+    phone: payload.phone_number, // Add 'phone' alias for convenience
+  });
+
+  if (blocklistCheck.blocked) {
+    logger.info("Call blocked by blocklist flag", {
+      request_id: requestId,
+      phone: payload.phone_number,
+      lead_id: payload.lead_id,
+      reason: blocklistCheck.reason,
+      flag_id: blocklistCheck.flag?.id,
+      flag_field: blocklistCheck.flag?.field,
+      flag_value: blocklistCheck.flag?.value,
+    });
+
+    return {
+      success: false,
+      lead_id: payload.lead_id,
+      call_id: "",
+      outcome: CallOutcome.NO_ANSWER,
+      error: blocklistCheck.reason || "Blocked by blocklist flag",
+    };
   }
 
   try {
