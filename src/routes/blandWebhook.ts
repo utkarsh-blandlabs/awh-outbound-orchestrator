@@ -242,14 +242,11 @@ function parseTranscriptFromWebhook(raw: any): BlandTranscript {
 }
 
 function determineOutcome(raw: any): CallOutcome {
-  // CRITICAL: ONLY mark as TRANSFERRED if warm_transfer_call.state === "MERGED"
-  // This is the ONLY reliable indicator that customer actually connected to agent
-  // DO NOT trust qualification data, summary mentions, or tags - customer may hang up during hold music
-  if (raw.warm_transfer_call && raw.warm_transfer_call.state === "MERGED") {
-    return CallOutcome.TRANSFERRED;
-  }
-
+  // CRITICAL FIX: Check answered_by FIRST before checking transfer state
+  // NEVER transfer voicemail, no-answer, or busy calls to agents!
   const answeredBy = raw.answered_by?.toLowerCase();
+
+  // Priority 1: Check if call went to voicemail/no-answer/busy (never transfer these!)
   if (answeredBy === "voicemail") {
     return CallOutcome.VOICEMAIL;
   }
@@ -258,6 +255,13 @@ function determineOutcome(raw: any): CallOutcome {
   }
   if (answeredBy === "busy") {
     return CallOutcome.BUSY;
+  }
+
+  // Priority 2: ONLY mark as TRANSFERRED if warm_transfer_call.state === "MERGED"
+  // This is the ONLY reliable indicator that customer (HUMAN) actually connected to agent
+  // DO NOT trust qualification data, summary mentions, or tags - customer may hang up during hold music
+  if (raw.warm_transfer_call && raw.warm_transfer_call.state === "MERGED") {
+    return CallOutcome.TRANSFERRED;
   }
 
   if (raw.completed && raw.status === "completed") {

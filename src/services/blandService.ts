@@ -356,14 +356,11 @@ class BlandService {
    * Based on status, answered_by, and other indicators
    */
   private determineOutcome(raw: any): CallOutcome {
-    // CRITICAL: ONLY mark as TRANSFERRED if warm_transfer_call.state === "MERGED"
-    // This is the ONLY reliable indicator that customer actually connected to agent
-    if (raw.warm_transfer_call && raw.warm_transfer_call.state === "MERGED") {
-      return CallOutcome.TRANSFERRED;
-    }
-
-    // Check answered_by field
+    // CRITICAL FIX: Check answered_by FIRST before checking transfer state
+    // NEVER transfer voicemail, no-answer, or busy calls to agents!
     const answeredBy = raw.answered_by?.toLowerCase();
+
+    // Priority 1: Check if call went to voicemail/no-answer/busy (never transfer these!)
     if (answeredBy === "voicemail") {
       return CallOutcome.VOICEMAIL;
     }
@@ -372,6 +369,12 @@ class BlandService {
     }
     if (answeredBy === "busy") {
       return CallOutcome.BUSY;
+    }
+
+    // Priority 2: ONLY mark as TRANSFERRED if warm_transfer_call.state === "MERGED"
+    // This is the ONLY reliable indicator that customer (HUMAN) actually connected to agent
+    if (raw.warm_transfer_call && raw.warm_transfer_call.state === "MERGED") {
+      return CallOutcome.TRANSFERRED;
     }
 
     // Check if call completed successfully with human
