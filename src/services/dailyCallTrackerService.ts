@@ -28,6 +28,8 @@ interface DailyCallRecord {
   last_call_timestamp: number;
   blocked: boolean; // Manual block flag
   blocked_reason?: string;
+  failed_call_error: boolean; // Auto-blocked for today due to "Call failed" error
+  failed_call_error_message?: string; // Error message from Bland AI
 }
 
 interface ProtectionConfig {
@@ -263,6 +265,7 @@ class DailyCallTrackerService {
         final_outcome: null,
         last_call_timestamp: 0,
         blocked: false,
+        failed_call_error: false,
       };
       this.records.set(normalized, record);
     }
@@ -294,6 +297,15 @@ class DailyCallTrackerService {
         allow: false,
         action: "block",
         reason: record.blocked_reason || "Number manually blocked",
+      };
+    }
+
+    // Failed call error check (auto-blocked for today only)
+    if (record.failed_call_error) {
+      return {
+        allow: false,
+        action: "block",
+        reason: `Blocked for today due to call failure: ${record.failed_call_error_message || "Call failed"}`,
       };
     }
 
@@ -632,6 +644,23 @@ class DailyCallTrackerService {
 
       logger.info("Number unblocked", { phone: record.phone_number });
     }
+  }
+
+  /**
+   * Mark a number as failed for today only (due to "Call failed" error)
+   * This blocks the number for the rest of the day, but automatically resets at midnight EST
+   */
+  markAsFailedForToday(phoneNumber: string, errorMessage: string): void {
+    const record = this.getOrCreateRecord(phoneNumber);
+    record.failed_call_error = true;
+    record.failed_call_error_message = errorMessage;
+    this.saveRecords();
+
+    logger.info("Number marked as failed for today", {
+      phone: record.phone_number,
+      error_message: errorMessage,
+      note: "Will automatically reset at midnight EST",
+    });
   }
 
   /**
