@@ -307,6 +307,8 @@ export interface BlandTranscript {
   recording_url?: string;
   // Warm transfer details
   warm_transfer_call?: any;
+  // Error information (for failed calls)
+  error_message?: string;
   [key: string]: any;
 }
 

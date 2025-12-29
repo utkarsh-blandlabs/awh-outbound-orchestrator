@@ -6,6 +6,7 @@ import { statisticsService } from "../services/statisticsService";
 import { dailyCallTracker } from "../services/dailyCallTrackerService";
 import { answeringMachineTracker } from "../services/answeringMachineTrackerService";
 import { redialQueueService } from "../services/redialQueueService";
+import { config } from "../config";
 import { BlandTranscript, CallOutcome } from "../types/awh";
 
 const router = Router();
@@ -187,6 +188,48 @@ async function processCallCompletion(
       scheduledCallbackTime
     );
 
+    // Auto-block for today: Check if this is a "Call failed" error and block for today only
+    // These are bad numbers from purchased data that don't even register as missed calls
+    // Automatically resets at midnight EST so the number can be tried again tomorrow
+    if (
+      config.blocklist.autoFlagFailedCalls &&
+      (transcript as any).error_message &&
+      transcript.outcome === CallOutcome.FAILED
+    ) {
+      const errorMessage = (transcript as any).error_message;
+
+      logger.warn("Auto-blocking failed call for today", {
+        requestId,
+        phone: callState.phone_number,
+        lead_id: callState.lead_id,
+        error_message: errorMessage,
+        call_id: callState.call_id,
+        note: "Will reset at midnight EST",
+      });
+
+      try {
+        // Mark phone number as failed for today only (resets at midnight EST)
+        dailyCallTracker.markAsFailedForToday(
+          callState.phone_number,
+          errorMessage
+        );
+
+        logger.info("Phone number blocked for today", {
+          requestId,
+          phone: callState.phone_number,
+          lead_id: callState.lead_id,
+          error_message: errorMessage,
+          note: "Will automatically reset at midnight EST",
+        });
+      } catch (blockError: any) {
+        logger.error("Failed to block number for today", {
+          requestId,
+          phone: callState.phone_number,
+          error: blockError.message,
+        });
+      }
+    }
+
     CallStateManager.completeCall(callState.call_id);
   } catch (error: any) {
     logger.error("Convoso update failed", {
@@ -238,6 +281,8 @@ function parseTranscriptFromWebhook(raw: any): BlandTranscript {
     transferred_at: raw.transferred_at,
     recording_url: raw.recording_url,
     warm_transfer_call: raw.warm_transfer_call,
+    // Include error_message for auto-blocklist detection
+    error_message: raw.error_message,
   };
 }
 

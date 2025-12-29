@@ -144,6 +144,15 @@ export const config = {
     ),
   },
 
+  // Blocklist auto-flag config
+  blocklist: {
+    // Automatically blocklist phone numbers that return "Call failed" errors
+    // These are bad numbers that don't register as missed calls
+    autoFlagFailedCalls: process.env["BLOCKLIST_AUTO_FLAG_FAILED_CALLS"] === "true",
+    failedCallReason: process.env["BLOCKLIST_FAILED_CALL_REASON"] ||
+      "Auto-flagged: Call failed (bad number)",
+  },
+
   // Logging
   logLevel: process.env["LOG_LEVEL"] || "info",
 };
