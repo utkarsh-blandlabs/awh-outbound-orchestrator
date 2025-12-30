@@ -160,6 +160,102 @@ class ConvosoService {
     }
   }
 
+  /**
+   * Lookup lead by phone number in Convoso
+   * Used for inbound calls where we don't have lead_id cached
+   */
+  async lookupLeadByPhone(phoneNumber: string): Promise<{
+    lead_id: string;
+    list_id: string;
+    first_name?: string;
+    last_name?: string;
+    state?: string;
+  } | null> {
+    try {
+      const convosoPhone = phoneNumber.replace(/^\+1/, "");
+
+      logger.info("Looking up lead by phone in Convoso", {
+        phone: convosoPhone,
+      });
+
+      const requestData = {
+        auth_token: config.convoso.authToken,
+        phone_number: convosoPhone,
+      };
+
+      const response = await retry(
+        async () => {
+          const result = await this.client.post("/v1/leads/search", null, {
+            params: requestData,
+          });
+          return result.data;
+        },
+        {
+          maxAttempts: config.retry.maxAttempts,
+          shouldRetry: isRetryableHttpError,
+        }
+      );
+
+      if (response.success && response.data?.entries?.length > 0) {
+        const leads = response.data.entries;
+
+        logger.info("Lead(s) found in Convoso", {
+          total_leads: leads.length,
+          phone: convosoPhone,
+          lead_ids: leads.map((l: any) => l.lead_id).join(", "),
+        });
+
+        // Priority 1: Return first non-DNC lead (we want to update it with DNC)
+        const nonDncLead = leads.find((l: any) => l.status !== "DNC");
+        if (nonDncLead) {
+          logger.info("Using non-DNC lead for update", {
+            lead_id: nonDncLead.lead_id || nonDncLead.id,
+            list_id: nonDncLead.list_id,
+            current_status: nonDncLead.status,
+          });
+
+          return {
+            lead_id: nonDncLead.lead_id || nonDncLead.id,
+            list_id: nonDncLead.list_id,
+            first_name: nonDncLead.first_name,
+            last_name: nonDncLead.last_name,
+            state: nonDncLead.state,
+          };
+        }
+
+        // Priority 2: If all are DNC, return the first one (already DNC'd)
+        const firstLead = leads[0];
+        logger.info("All leads already DNC, using first", {
+          lead_id: firstLead.lead_id || firstLead.id,
+          list_id: firstLead.list_id,
+          status: firstLead.status,
+        });
+
+        return {
+          lead_id: firstLead.lead_id || firstLead.id,
+          list_id: firstLead.list_id,
+          first_name: firstLead.first_name,
+          last_name: firstLead.last_name,
+          state: firstLead.state,
+        };
+      }
+
+      logger.warn("No lead found for phone number", {
+        phone: convosoPhone,
+      });
+
+      return null;
+    } catch (error: any) {
+      logger.error("Failed to lookup lead by phone", {
+        error: error.message,
+        phone: phoneNumber,
+        response: error.response?.data,
+      });
+      // Return null instead of throwing - we'll handle missing lead gracefully
+      return null;
+    }
+  }
+
   private formatTranscriptForConvoso(
     transcript: BlandTranscript,
     convosoStatus: string

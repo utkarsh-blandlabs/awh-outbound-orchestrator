@@ -63,15 +63,36 @@ router.post("/bland-callback", async (req: Request, res: Response) => {
         requestId,
         call_id: callId,
         to: req.body.to,
+        from: req.body.from,
         answered_by: req.body.answered_by,
         status: req.body.status,
-        note: "Call may have completed before server restart, or webhook arrived late",
+        note: "Likely an INBOUND call (customer called Ashley back) or webhook after server restart",
       });
+
+      // INBOUND CALL HANDLING
+      // This is likely a customer calling Ashley back (not initiated by orchestrator)
+      // We still need to process it and update Convoso, especially for DNC requests
+      processInboundCall(req.body, transcript, requestId)
+        .then(() => {
+          logger.info("Inbound call processing completed", {
+            requestId,
+            call_id: callId,
+            phone: req.body.from || req.body.to,
+          });
+        })
+        .catch((error) => {
+          logger.error("Inbound call processing failed", {
+            requestId,
+            call_id: callId,
+            error: error.message,
+            stack: error.stack,
+          });
+        });
 
       // Still return 200 OK to Bland so they don't retry
       return res.status(200).json({
         success: true,
-        message: "Webhook received (no pending call found - may be after server restart)",
+        message: "Webhook received (inbound call - processing asynchronously)",
         requestId,
         call_id: callId,
       });
@@ -284,6 +305,295 @@ function parseTranscriptFromWebhook(raw: any): BlandTranscript {
     // Include error_message for auto-blocklist detection
     error_message: raw.error_message,
   };
+}
+
+async function processInboundCall(
+  raw: any,
+  transcript: BlandTranscript,
+  requestId: string
+): Promise<void> {
+  try {
+    // Extract phone number - could be in 'from' (customer calling) or 'to' field
+    const phoneNumber = raw.from || raw.to;
+    const variables = raw.variables || {};
+    const callId = raw.call_id || raw.c_id;
+
+    if (!phoneNumber) {
+      logger.error("No phone number found in inbound call webhook", {
+        requestId,
+        payload_keys: Object.keys(raw),
+      });
+      return;
+    }
+
+    logger.info("Processing inbound call", {
+      requestId,
+      call_id: callId,
+      phone: phoneNumber,
+      outcome: transcript.outcome,
+      answered_by: raw.answered_by,
+      has_variables: Object.keys(variables).length > 0,
+    });
+
+    // Step 1: Try to get lead info from pathway variables (if Delaine configures it)
+    let leadInfo: {
+      lead_id: string;
+      list_id: string;
+      first_name?: string;
+      last_name?: string;
+      state?: string;
+    } | null = null;
+
+    if (variables.lead_id && variables.list_id) {
+      logger.info("Lead info found in pathway variables", {
+        requestId,
+        lead_id: variables.lead_id,
+        list_id: variables.list_id,
+      });
+
+      leadInfo = {
+        lead_id: variables.lead_id,
+        list_id: variables.list_id,
+        first_name: variables.first_name || transcript.first_name,
+        last_name: variables.last_name || transcript.last_name,
+        state: variables.state || variables.customer_state || transcript.state,
+      };
+    } else {
+      // Step 2: Look up lead in Convoso by phone number
+      logger.info("Lead info not in variables, looking up in Convoso", {
+        requestId,
+        phone: phoneNumber,
+      });
+
+      leadInfo = await convosoService.lookupLeadByPhone(phoneNumber);
+
+      if (!leadInfo) {
+        logger.warn("Lead not found in Convoso for inbound call", {
+          requestId,
+          phone: phoneNumber,
+          note: "Will still process with available data",
+        });
+      }
+    }
+
+    // Step 3: Check if this is a DNC request
+    const isDNC = checkIfDNC(transcript, raw);
+
+    if (isDNC) {
+      logger.warn("DNC detected in inbound call", {
+        requestId,
+        phone: phoneNumber,
+        lead_id: leadInfo?.lead_id,
+        outcome: transcript.outcome,
+        summary: raw.summary,
+      });
+
+      // Add to permanent blocklist immediately
+      const { blocklistService } = await import("../services/blocklistService");
+      blocklistService.addFlag(
+        "phone",
+        phoneNumber,
+        "DNC request via inbound call",
+        "system_inbound_dnc"
+      );
+
+      logger.info("Phone number added to DNC blocklist", {
+        requestId,
+        phone: phoneNumber,
+        lead_id: leadInfo?.lead_id,
+      });
+    }
+
+    // Step 4: Update Convoso if we have lead info
+    if (leadInfo) {
+      logger.info("Updating Convoso for inbound call", {
+        requestId,
+        lead_id: leadInfo.lead_id,
+        list_id: leadInfo.list_id,
+        outcome: transcript.outcome,
+      });
+
+      try {
+        await convosoService.updateCallLog(
+          leadInfo.lead_id,
+          leadInfo.list_id,
+          phoneNumber,
+          transcript
+        );
+
+        logger.info("Convoso updated successfully for inbound call", {
+          requestId,
+          lead_id: leadInfo.lead_id,
+        });
+      } catch (error: any) {
+        logger.error("Failed to update Convoso for inbound call", {
+          requestId,
+          lead_id: leadInfo.lead_id,
+          error: error.message,
+        });
+      }
+    } else {
+      logger.warn("Skipping Convoso update (no lead info available)", {
+        requestId,
+        phone: phoneNumber,
+        note: "Lead not found in Convoso and not provided in pathway variables",
+      });
+    }
+
+    // Step 5: Record statistics
+    statisticsService.recordCallComplete(
+      transcript.outcome,
+      transcript.answered_by
+    );
+
+    // Step 6: Record call completion in daily tracker
+    dailyCallTracker.recordCallComplete(
+      phoneNumber,
+      callId,
+      transcript.outcome,
+      transcript
+    );
+
+    // Step 7: Record attempt in answering machine tracker (if we have lead info)
+    if (leadInfo) {
+      answeringMachineTracker.recordAttempt(
+        leadInfo.lead_id,
+        phoneNumber,
+        transcript.outcome,
+        callId
+      );
+    }
+
+    // Step 8: Add to redial queue (if we have lead info and it's not a success outcome)
+    if (leadInfo) {
+      const callbackRequestedAt = (transcript as any)["callback_requested_at"];
+      const scheduledCallbackTime = callbackRequestedAt
+        ? new Date(callbackRequestedAt).getTime()
+        : undefined;
+
+      await redialQueueService.addOrUpdateLead(
+        leadInfo.lead_id,
+        phoneNumber,
+        leadInfo.list_id,
+        leadInfo.first_name || "",
+        leadInfo.last_name || "",
+        leadInfo.state || "",
+        transcript.outcome,
+        callId,
+        scheduledCallbackTime
+      );
+
+      logger.info("Inbound call added to redial queue", {
+        requestId,
+        lead_id: leadInfo.lead_id,
+        outcome: transcript.outcome,
+      });
+    }
+
+    // Step 9: Handle failed call auto-block (same as outbound)
+    if (
+      config.blocklist.autoFlagFailedCalls &&
+      (transcript as any).error_message &&
+      transcript.outcome === CallOutcome.FAILED
+    ) {
+      const errorMessage = (transcript as any).error_message;
+
+      logger.warn("Auto-blocking failed inbound call for today", {
+        requestId,
+        phone: phoneNumber,
+        lead_id: leadInfo?.lead_id,
+        error_message: errorMessage,
+        call_id: callId,
+        note: "Will reset at midnight EST",
+      });
+
+      try {
+        dailyCallTracker.markAsFailedForToday(phoneNumber, errorMessage);
+
+        logger.info("Phone number blocked for today (inbound)", {
+          requestId,
+          phone: phoneNumber,
+          lead_id: leadInfo?.lead_id,
+          error_message: errorMessage,
+        });
+      } catch (blockError: any) {
+        logger.error("Failed to block number for today (inbound)", {
+          requestId,
+          phone: phoneNumber,
+          error: blockError.message,
+        });
+      }
+    }
+
+    logger.info("Inbound call processing completed successfully", {
+      requestId,
+      call_id: callId,
+      phone: phoneNumber,
+      lead_id: leadInfo?.lead_id,
+      outcome: transcript.outcome,
+      convoso_updated: !!leadInfo,
+      dnc_blocked: isDNC,
+    });
+  } catch (error: any) {
+    logger.error("Inbound call processing error", {
+      requestId,
+      error: error.message,
+      stack: error.stack,
+    });
+    throw error;
+  }
+}
+
+function checkIfDNC(transcript: BlandTranscript, raw: any): boolean {
+  // Check outcome
+  const outcome = transcript.outcome?.toLowerCase() || "";
+  if (
+    outcome.includes("dnc") ||
+    outcome.includes("do_not_call") ||
+    outcome.includes("remove") ||
+    outcome.includes("stop_calling")
+  ) {
+    return true;
+  }
+
+  // Check summary
+  const summary = (raw.summary || "").toLowerCase();
+  if (
+    summary.includes("do not call") ||
+    summary.includes("remove from list") ||
+    summary.includes("stop calling") ||
+    summary.includes("take me off") ||
+    summary.includes("don't call")
+  ) {
+    return true;
+  }
+
+  // Check transcript
+  const transcriptText = (transcript.transcript || "").toLowerCase();
+  if (
+    transcriptText.includes("do not call") ||
+    transcriptText.includes("remove from list") ||
+    transcriptText.includes("stop calling") ||
+    transcriptText.includes("take me off") ||
+    transcriptText.includes("don't call")
+  ) {
+    return true;
+  }
+
+  // Check pathway tags
+  const tags = raw.pathway_tags || [];
+  if (
+    tags.some(
+      (tag: string) =>
+        tag.toLowerCase().includes("dnc") ||
+        tag.toLowerCase().includes("do_not_call") ||
+        tag.toLowerCase().includes("remove")
+    )
+  ) {
+    return true;
+  }
+
+  return false;
 }
 
 function determineOutcome(raw: any): CallOutcome {
