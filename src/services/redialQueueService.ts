@@ -507,7 +507,6 @@ class RedialQueueService {
 
     try {
       const now = this.getNowEST();
-      const todayDate = this.getCurrentDateEST(); // YYYY-MM-DD format
 
       // Safety Check #4: Reload current month records to get latest data
       await this.loadCurrentMonthRecords();
@@ -521,27 +520,23 @@ class RedialQueueService {
         current_time: new Date(now).toISOString(),
       });
 
-      // Filter #1: Only records from today (created or updated today)
-      const todayRecords = allRecords.filter((record) => {
+      // Filter #1: Only records within retention period (CHANGED: not just today - include old leads)
+      const retentionMs = this.queueConfig.retention_days * 24 * 60 * 60 * 1000;
+      const cutoffTimestamp = now - retentionMs;
+      const withinRetentionRecords = allRecords.filter((record) => {
         if (!record || !record.created_at) return false;
-        // Convert record timestamp to EST date for comparison
-        const formatter = new Intl.DateTimeFormat("en-CA", {
-          timeZone: "America/New_York",
-          year: "numeric",
-          month: "2-digit",
-          day: "2-digit",
-        });
-        const recordDate = formatter.format(new Date(record.created_at));
-        return recordDate === todayDate;
+        return record.created_at >= cutoffTimestamp;
       });
 
-      logger.debug("Filtered to today's records", {
-        today: todayDate,
-        today_records: todayRecords.length,
+      logger.debug("Filtered to records within retention period", {
+        retention_days: this.queueConfig.retention_days,
+        within_retention: withinRetentionRecords.length,
+        total: allRecords.length,
+        cutoff_date: new Date(cutoffTimestamp).toISOString(),
       });
 
       // Filter #2: Only favorable statuses (pending or rescheduled ready)
-      const favorableRecords = todayRecords.filter((record) => {
+      const favorableRecords = withinRetentionRecords.filter((record) => {
         // Null safety checks
         if (!record || !record.status) return false;
 
@@ -600,7 +595,7 @@ class RedialQueueService {
         ready_to_dial: readyLeads.length,
         breakdown: {
           total: allRecords.length,
-          today_only: todayRecords.length,
+          within_retention: withinRetentionRecords.length,
           favorable_status: favorableRecords.length,
           under_max_attempts: underMaxAttempts.length,
           time_ready: readyLeads.length,

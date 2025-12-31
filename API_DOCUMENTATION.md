@@ -3,14 +3,12 @@
 Complete API reference for all available endpoints.
 
 ---
-
 ## Table of Contents
 
 1. [Public Endpoints](#public-endpoints)
 2. [Webhook Endpoints](#webhook-endpoints)
 3. [Admin API Endpoints](#admin-api-endpoints)
 4. [Authentication](#authentication)
-
 ---
 
 ## Public Endpoints
