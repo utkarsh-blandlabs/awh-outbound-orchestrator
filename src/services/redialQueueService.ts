@@ -166,11 +166,14 @@ class RedialQueueService {
   }
 
   /**
-   * Generate unique key from lead_id + phone_number
+   * Generate unique key from phone_number ONLY
+   * CHANGED: Previously used lead_id + phone to allow same phone in different lists
+   * NOW: Use phone only to prevent duplicate calls to same number from different lists
+   * Per Delaine's feedback: "treat as 1 lead, otherwise they would get double the redials"
    */
   private generateKey(leadId: string, phoneNumber: string): string {
     const normalized = phoneNumber.replace(/\D/g, "");
-    return `${leadId}_${normalized}`;
+    return normalized; // Use phone number only, not lead_id + phone
   }
 
   /**
@@ -339,6 +342,23 @@ class RedialQueueService {
       }
 
       // Update existing record (new call)
+      // IMPORTANT: Update lead metadata (lead_id, list_id, name) in case same phone comes from different list
+      const leadChanged = existing.lead_id !== leadId || existing.list_id !== listId;
+      if (leadChanged) {
+        logger.info("Same phone from different list - updating to most recent lead info", {
+          phone: phoneNumber,
+          old_lead_id: existing.lead_id,
+          old_list_id: existing.list_id,
+          new_lead_id: leadId,
+          new_list_id: listId,
+          current_attempts: existing.attempts,
+        });
+      }
+      existing.lead_id = leadId; // Use most recent lead_id
+      existing.list_id = listId; // Use most recent list_id
+      existing.first_name = firstName; // Use most recent name
+      existing.last_name = lastName;
+      existing.state = state; // Use most recent state
       existing.attempts += 1;
       existing.last_call_timestamp = now;
       existing.last_outcome = outcome;
