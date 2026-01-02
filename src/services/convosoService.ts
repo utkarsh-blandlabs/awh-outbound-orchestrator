@@ -161,6 +161,75 @@ class ConvosoService {
   }
 
   /**
+   * Check if a lead should be skipped based on current Convoso status
+   * Returns true if lead has already been successfully processed (TRANSFERRED, SALE, etc.)
+   * This prevents calling leads that were contacted through other channels
+   */
+  async shouldSkipLead(
+    phoneNumber: string,
+    successStatuses: string[] = ["ACA", "SALE", "TRANSFERRED"]
+  ): Promise<{ skip: boolean; reason?: string; status?: string }> {
+    try {
+      const convosoPhone = phoneNumber.replace(/^\+1/, "");
+
+      logger.debug("Checking lead status in Convoso before dialing", {
+        phone: convosoPhone,
+      });
+
+      const requestData = {
+        auth_token: config.convoso.authToken,
+        phone_number: convosoPhone,
+      };
+
+      const response = await retry(
+        async () => {
+          const result = await this.client.post("/v1/leads/search", null, {
+            params: requestData,
+          });
+          return result.data;
+        },
+        {
+          maxAttempts: 2, // Quick check, don't retry too much
+          shouldRetry: isRetryableHttpError,
+        }
+      );
+
+      if (response.success && response.data?.entries?.length > 0) {
+        const leads = response.data.entries;
+
+        // Check if any lead has a success status
+        const successLead = leads.find((l: any) =>
+          successStatuses.includes(l.status?.toUpperCase())
+        );
+
+        if (successLead) {
+          logger.info("Lead already processed successfully in Convoso - skipping call", {
+            phone: convosoPhone,
+            status: successLead.status,
+            lead_id: successLead.lead_id || successLead.id,
+          });
+
+          return {
+            skip: true,
+            reason: `Lead already has status: ${successLead.status}`,
+            status: successLead.status,
+          };
+        }
+      }
+
+      // No success status found or lead not found - proceed with call
+      return { skip: false };
+    } catch (error: any) {
+      logger.warn("Failed to check lead status in Convoso - proceeding with call", {
+        error: error.message,
+        phone: phoneNumber,
+      });
+      // On error, don't skip - better to attempt the call than miss it
+      return { skip: false };
+    }
+  }
+
+  /**
    * Lookup lead by phone number in Convoso
    * Used for inbound calls where we don't have lead_id cached
    */

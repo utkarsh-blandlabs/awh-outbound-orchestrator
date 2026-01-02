@@ -8,6 +8,7 @@ import path from "path";
 import { logger } from "../utils/logger";
 import { config } from "../config";
 import { schedulerService } from "./schedulerService";
+import { convosoService } from "./convosoService";
 
 interface RedialRecord {
   lead_id: string;
@@ -36,6 +37,10 @@ interface RedialQueueConfig {
   success_outcomes: string[]; // Outcomes that stop redialing
   retention_days: number; // Keep files for X days
   process_interval_minutes: number; // How often to check queue
+  // Three-tier day-based intervals (overrides progressive_intervals when set)
+  day0_interval_minutes: number; // Same day as first call (aggressive)
+  day1_interval_minutes: number; // Next day (moderate)
+  day2_plus_interval_minutes: number; // 2+ days old (gentle)
 }
 
 class RedialQueueService {
@@ -80,6 +85,10 @@ class RedialQueueService {
       process_interval_minutes: parseInt(
         process.env["REDIAL_PROCESS_INTERVAL"] || "5"
       ),
+      // Three-tier day-based intervals
+      day0_interval_minutes: parseInt(process.env["REDIAL_INTERVAL_DAY0_MINUTES"] || "45"),
+      day1_interval_minutes: parseInt(process.env["REDIAL_INTERVAL_DAY1_MINUTES"] || "120"),
+      day2_plus_interval_minutes: parseInt(process.env["REDIAL_INTERVAL_DAY2_PLUS_MINUTES"] || "240"),
     };
 
     this.ensureDirectories();
@@ -104,14 +113,63 @@ class RedialQueueService {
    * 2nd call: 0 min (INSTANT), 3rd: 0 min (INSTANT), 4th: 5 min, 5th: 10 min,
    * 6th: 30 min, 7th: 60 min (1hr), 8th: 120 min (2hr)
    */
-  private getProgressiveInterval(attemptNumber: number): number {
-    const intervals = this.queueConfig.progressive_intervals;
-    const index = attemptNumber - 1; // Convert to 0-based index
+  /**
+   * Calculate which "day" a lead is on (0, 1, or 2+) based on created_at timestamp
+   * Day 0: Same day as first call (created_at date = today's date in EST)
+   * Day 1: Next day after first call (created_at date = yesterday's date in EST)
+   * Day 2+: 2 or more days after first call (created_at date >= 2 days ago in EST)
+   */
+  private getLeadDaysSinceCreation(createdAtTimestamp: number): number {
+    const now = this.getNowEST();
 
-    if (index < 0) return intervals[0] || 0;
-    if (index >= intervals.length) return intervals[intervals.length - 1] || 120;
+    // Get start of day (12:00 AM EST) for created_at and now
+    const createdDate = new Date(createdAtTimestamp);
+    const createdStartOfDay = new Date(
+      createdDate.getFullYear(),
+      createdDate.getMonth(),
+      createdDate.getDate()
+    ).getTime();
 
-    return intervals[index] || 30; // Fallback to 30 if undefined
+    const nowDate = new Date(now);
+    const nowStartOfDay = new Date(
+      nowDate.getFullYear(),
+      nowDate.getMonth(),
+      nowDate.getDate()
+    ).getTime();
+
+    // Calculate difference in days
+    const daysDiff = Math.floor((nowStartOfDay - createdStartOfDay) / (24 * 60 * 60 * 1000));
+
+    return Math.max(0, daysDiff);
+  }
+
+  /**
+   * Get redial interval based on lead age (days since creation)
+   * Uses three-tier system: Day 0 (45min), Day 1 (120min), Day 2+ (240min)
+   */
+  private getProgressiveInterval(attemptNumber: number, createdAtTimestamp?: number): number {
+    // If no created_at provided, fall back to old progressive intervals
+    if (!createdAtTimestamp) {
+      const intervals = this.queueConfig.progressive_intervals;
+      const index = attemptNumber - 1;
+      if (index < 0) return intervals[0] || 0;
+      if (index >= intervals.length) return intervals[intervals.length - 1] || 120;
+      return intervals[index] || 30;
+    }
+
+    // Use day-based intervals
+    const daysSinceCreation = this.getLeadDaysSinceCreation(createdAtTimestamp);
+
+    if (daysSinceCreation === 0) {
+      // Same day: aggressive (45 min)
+      return this.queueConfig.day0_interval_minutes;
+    } else if (daysSinceCreation === 1) {
+      // Day 1: moderate (120 min / 2 hours)
+      return this.queueConfig.day1_interval_minutes;
+    } else {
+      // Day 2+: gentle (240 min / 4 hours)
+      return this.queueConfig.day2_plus_interval_minutes;
+    }
   }
 
   private ensureDirectories(): void {
@@ -166,11 +224,14 @@ class RedialQueueService {
   }
 
   /**
-   * Generate unique key from lead_id + phone_number
+   * Generate unique key from phone_number ONLY
+   * CHANGED: Previously used lead_id + phone to allow same phone in different lists
+   * NOW: Use phone only to prevent duplicate calls to same number from different lists
+   * Per Delaine's feedback: "treat as 1 lead, otherwise they would get double the redials"
    */
   private generateKey(leadId: string, phoneNumber: string): string {
     const normalized = phoneNumber.replace(/\D/g, "");
-    return `${leadId}_${normalized}`;
+    return normalized; // Use phone number only, not lead_id + phone
   }
 
   /**
@@ -339,6 +400,23 @@ class RedialQueueService {
       }
 
       // Update existing record (new call)
+      // IMPORTANT: Update lead metadata (lead_id, list_id, name) in case same phone comes from different list
+      const leadChanged = existing.lead_id !== leadId || existing.list_id !== listId;
+      if (leadChanged) {
+        logger.info("Same phone from different list - updating to most recent lead info", {
+          phone: phoneNumber,
+          old_lead_id: existing.lead_id,
+          old_list_id: existing.list_id,
+          new_lead_id: leadId,
+          new_list_id: listId,
+          current_attempts: existing.attempts,
+        });
+      }
+      existing.lead_id = leadId; // Use most recent lead_id
+      existing.list_id = listId; // Use most recent list_id
+      existing.first_name = firstName; // Use most recent name
+      existing.last_name = lastName;
+      existing.state = state; // Use most recent state
       existing.attempts += 1;
       existing.last_call_timestamp = now;
       existing.last_outcome = outcome;
@@ -352,8 +430,8 @@ class RedialQueueService {
         existing.scheduled_callback_time = scheduledCallbackTime;
         existing.status = "rescheduled";
       } else {
-        // Use progressive interval based on attempt number
-        const intervalMinutes = this.getProgressiveInterval(existing.attempts);
+        // Use day-based interval (days since lead creation)
+        const intervalMinutes = this.getProgressiveInterval(existing.attempts, existing.created_at);
         // IMPORTANT: Add minimum 2-minute delay even for "instant" (0 min) intervals
         // This prevents race conditions where call is still active/completing
         const actualIntervalMs = intervalMinutes === 0
@@ -375,11 +453,12 @@ class RedialQueueService {
         max: this.queueConfig.max_redial_attempts,
         status: existing.status,
         next_redial: new Date(existing.next_redial_timestamp).toISOString(),
-        next_interval_minutes: this.getProgressiveInterval(existing.attempts),
+        next_interval_minutes: this.getProgressiveInterval(existing.attempts, existing.created_at),
+        days_since_creation: this.getLeadDaysSinceCreation(existing.created_at),
       });
     } else {
-      // Create new record with progressive interval for first attempt
-      const firstIntervalMinutes = this.getProgressiveInterval(1);
+      // Create new record with day-based interval for first attempt
+      const firstIntervalMinutes = this.getProgressiveInterval(1, now);
       // IMPORTANT: Add minimum 2-minute delay even for "instant" (0 min) intervals
       // This prevents race conditions where call is still active/completing
       const actualIntervalMs = firstIntervalMinutes === 0
@@ -674,6 +753,29 @@ class RedialQueueService {
             continue;
           }
 
+          // PRE-CALL SAFETY CHECK #4: Check Convoso for success status
+          // This prevents calling leads that were successfully contacted via other channels
+          const skipCheck = await convosoService.shouldSkipLead(
+            lead.phone_number,
+            this.queueConfig.success_outcomes
+          );
+
+          if (skipCheck.skip) {
+            logger.info("SAFETY: Skipping redial - lead already processed in Convoso", {
+              lead_id: lead.lead_id,
+              phone: lead.phone_number,
+              convoso_status: skipCheck.status,
+              reason: skipCheck.reason,
+            });
+
+            // Mark lead as completed to prevent future redialing
+            lead.status = "completed";
+            lead.updated_at = now;
+            await this.saveRecords();
+            skippedCount++;
+            continue;
+          }
+
           // ALL SAFETY CHECKS PASSED - PROCEED WITH CALL
           logger.info("CALLING: All safety checks passed, initiating redial", {
             lead_id: lead.lead_id,
@@ -718,9 +820,9 @@ class RedialQueueService {
             stack: error.stack,
           });
 
-          // Safe error recovery: Schedule retry with progressive interval
+          // Safe error recovery: Schedule retry with day-based interval
           try {
-            const retryIntervalMinutes = this.getProgressiveInterval(lead.attempts + 1);
+            const retryIntervalMinutes = this.getProgressiveInterval(lead.attempts + 1, lead.created_at);
             const retryIntervalMs = retryIntervalMinutes === 0
               ? 2 * 60 * 1000 // Minimum 2 minutes
               : retryIntervalMinutes * 60 * 1000;
@@ -733,6 +835,7 @@ class RedialQueueService {
               lead_id: lead.lead_id,
               phone: lead.phone_number,
               retry_in_minutes: retryIntervalMinutes || 2,
+              days_since_creation: this.getLeadDaysSinceCreation(lead.created_at),
             });
           } catch (saveError: any) {
             logger.error("Failed to save retry schedule", {
