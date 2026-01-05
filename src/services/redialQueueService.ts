@@ -255,12 +255,58 @@ class RedialQueueService {
       const data = fs.readFileSync(filePath, "utf-8");
       const parsed = JSON.parse(data);
 
-      this.records = new Map(Object.entries(parsed));
+      // CRITICAL FIX: Migrate old key format (lead_id_phone) to new format (phone-only)
+      // This prevents duplicate entries for the same phone number
+      const migratedRecords = new Map<string, RedialRecord>();
+      let migrationCount = 0;
+      let mergeCount = 0;
 
-      logger.info("Loaded redial queue records", {
+      for (const [oldKey, record] of Object.entries<RedialRecord>(parsed)) {
+        // Generate new key (phone-only)
+        const newKey = this.generateKey(record.lead_id, record.phone_number);
+
+        // Check if we already have a record with this phone number
+        const existing = migratedRecords.get(newKey);
+
+        if (existing) {
+          // MERGE: Keep the record with more attempts (more history)
+          if (record.attempts > existing.attempts) {
+            migratedRecords.set(newKey, record);
+            logger.warn("Merged duplicate redial record - keeping record with more attempts", {
+              phone: record.phone_number,
+              old_key: oldKey,
+              new_key: newKey,
+              kept_attempts: record.attempts,
+              discarded_attempts: existing.attempts,
+            });
+          }
+          mergeCount++;
+        } else {
+          migratedRecords.set(newKey, record);
+          if (oldKey !== newKey) {
+            migrationCount++;
+          }
+        }
+      }
+
+      this.records = migratedRecords;
+
+      logger.info("Loaded and migrated redial queue records", {
         month: this.currentMonth,
-        count: this.records.size,
+        total_loaded: Object.keys(parsed).length,
+        final_count: this.records.size,
+        migrated: migrationCount,
+        merged_duplicates: mergeCount,
       });
+
+      // Save migrated records back to file if migration occurred
+      if (migrationCount > 0 || mergeCount > 0) {
+        await this.saveRecords();
+        logger.info("Saved migrated redial queue records to disk", {
+          migrated: migrationCount,
+          merged: mergeCount,
+        });
+      }
     } catch (error: any) {
       logger.error("Failed to load redial queue records", {
         error: error.message,
