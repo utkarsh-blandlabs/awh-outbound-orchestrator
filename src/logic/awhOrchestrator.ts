@@ -6,6 +6,7 @@ import { schedulerService } from "../services/schedulerService";
 import { dailyCallTracker } from "../services/dailyCallTrackerService";
 import { answeringMachineTracker } from "../services/answeringMachineTrackerService";
 import { blocklistService } from "../services/blocklistService";
+import { webhookLogger } from "../services/webhookLogger";
 import {
   ConvosoWebhookPayload,
   OrchestrationResult,
@@ -147,6 +148,15 @@ export async function handleAwhOutbound(
       flag_value: blocklistCheck.flag?.value,
     });
 
+    // Log blocklist result to webhook logger
+    if (requestId) {
+      webhookLogger.logBlocklistResult(
+        requestId,
+        true,
+        blocklistCheck.reason || "Blocked by blocklist flag"
+      );
+    }
+
     return {
       success: false,
       lead_id: payload.lead_id,
@@ -154,6 +164,11 @@ export async function handleAwhOutbound(
       outcome: CallOutcome.NO_ANSWER,
       error: blocklistCheck.reason || "Blocked by blocklist flag",
     };
+  }
+
+  // Log that call was allowed by blocklist
+  if (requestId) {
+    webhookLogger.logBlocklistResult(requestId, false);
   }
 
   try {
