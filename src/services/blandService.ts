@@ -84,12 +84,8 @@ class BlandService {
           .replace(/\{\{last_name\}\}/g, payload.lastName)
       : "";
 
-    // Add callback number to voicemail if not already included
-    const voicemailWithCallback = voicemailMessage && formattedCallback
-      ? (voicemailMessage.includes(formattedCallback)
-          ? voicemailMessage
-          : `${voicemailMessage} Call me at ${formattedCallback}.`)
-      : voicemailMessage;
+    // Use voicemail message as-is (phone number should be included in .env)
+    const voicemailWithCallback = voicemailMessage ?? "";
 
     const smsMessage = config.bland.smsMessage
       ? config.bland.smsMessage
