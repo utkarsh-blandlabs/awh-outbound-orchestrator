@@ -17,7 +17,9 @@ interface RedialRecord {
   first_name: string;
   last_name: string;
   state: string; // Required by Convoso payload
-  attempts: number;
+  attempts: number; // Total lifetime attempts (for analytics)
+  attempts_today: number; // Attempts made today (resets daily at 12:01 AM EST)
+  last_attempt_date: string; // "YYYY-MM-DD" format to detect day change
   last_call_timestamp: number;
   next_redial_timestamp: number;
   scheduled_callback_time?: number; // If customer requested callback at specific time
@@ -26,14 +28,16 @@ interface RedialRecord {
   last_call_id: string;
   created_at: number;
   updated_at: number;
-  status: "pending" | "rescheduled" | "completed" | "max_attempts" | "paused";
+  daily_max_reached_at?: number; // Timestamp when hit daily max
+  status: "pending" | "rescheduled" | "completed" | "daily_max_reached" | "paused";
 }
 
 interface RedialQueueConfig {
   enabled: boolean;
   redial_interval_minutes: number; // DEPRECATED - use progressive_intervals instead
   progressive_intervals: number[]; // Progressive intervals: [10, 30, 40, 60] minutes
-  max_redial_attempts: number; // Max redial attempts per lead
+  max_daily_attempts: number; // Max redial attempts PER DAY per lead (resets daily)
+  daily_reset_hour: number; // Hour (0-23) to reset daily counters (default: 0 = 12:01 AM)
   success_outcomes: string[]; // Outcomes that stop redialing
   retention_days: number; // Keep files for X days
   process_interval_minutes: number; // How often to check queue
@@ -71,8 +75,11 @@ class RedialQueueService {
         process.env["REDIAL_INTERVAL_MINUTES"] || "30"
       ),
       progressive_intervals: progressiveIntervals.length > 0 ? progressiveIntervals : [0, 0, 5, 10, 30, 60, 120],
-      max_redial_attempts: parseInt(
-        process.env["REDIAL_MAX_ATTEMPTS"] || "8"
+      max_daily_attempts: parseInt(
+        process.env["REDIAL_MAX_DAILY_ATTEMPTS"] || "8"
+      ),
+      daily_reset_hour: parseInt(
+        process.env["REDIAL_DAILY_RESET_HOUR"] || "0"
       ),
       success_outcomes: (
         process.env["REDIAL_SUCCESS_OUTCOMES"] ||
@@ -92,7 +99,7 @@ class RedialQueueService {
     };
 
     this.ensureDirectories();
-    this.loadCurrentMonthRecords();
+    this.loadAllRecentRecords();
 
     // Auto-start if enabled
     if (this.queueConfig.enabled) {
@@ -102,9 +109,50 @@ class RedialQueueService {
     logger.info("Redial queue service initialized", {
       enabled: this.queueConfig.enabled,
       progressive_intervals: this.queueConfig.progressive_intervals,
-      max_attempts: this.queueConfig.max_redial_attempts,
+      max_daily_attempts: this.queueConfig.max_daily_attempts,
+      daily_reset_hour: this.queueConfig.daily_reset_hour,
       success_outcomes: this.queueConfig.success_outcomes,
     });
+  }
+
+  /**
+   * Reset daily attempt counters for all leads
+   * Called at start of each processing cycle if new day detected
+   */
+  private async resetDailyCountersIfNeeded(): Promise<void> {
+    const today = this.getCurrentDateEST(); // "2026-01-06"
+    let resetCount = 0;
+
+    for (const [key, record] of this.records.entries()) {
+      // Skip if already processed today
+      if (record.last_attempt_date === today) {
+        continue;
+      }
+
+      // Reset daily counter for new day
+      record.attempts_today = 0;
+
+      // If was at daily max, move back to pending
+      if (record.status === "daily_max_reached") {
+        record.status = "pending";
+        record.next_redial_timestamp = this.getNowEST(); // Ready to call now
+        logger.info("Reset lead from daily_max_reached to pending", {
+          phone: record.phone_number,
+          lead_id: record.lead_id,
+          total_lifetime_attempts: record.attempts,
+        });
+      }
+
+      resetCount++;
+    }
+
+    if (resetCount > 0) {
+      await this.saveRecords();
+      logger.info("Reset daily attempt counters for new day", {
+        date: today,
+        leads_reset: resetCount,
+      });
+    }
   }
 
   /**
@@ -236,6 +284,7 @@ class RedialQueueService {
 
   /**
    * Load records from current month file with file locking
+   * @deprecated Use loadAllRecentRecords() instead to load all files within retention period
    */
   private async loadCurrentMonthRecords(): Promise<void> {
     const filePath = this.getRecordFilePath(this.currentMonth);
@@ -311,6 +360,139 @@ class RedialQueueService {
       logger.error("Failed to load redial queue records", {
         error: error.message,
         month: this.currentMonth,
+      });
+    } finally {
+      this.fileLock = false;
+    }
+  }
+
+  /**
+   * CRITICAL FIX: Load records from ALL files within retention period
+   * Previously only loaded current month, causing leads to be lost during month transitions
+   * Now loads all months within retention_days (default 30 days)
+   */
+  private async loadAllRecentRecords(): Promise<void> {
+    try {
+      await this.waitForFileLock();
+      this.fileLock = true;
+
+      const now = this.getNowEST();
+      const retentionMs = this.queueConfig.retention_days * 24 * 60 * 60 * 1000;
+      const cutoffTimestamp = now - retentionMs;
+
+      // Get all redial-queue_*.json files
+      const allRecords = new Map<string, RedialRecord>();
+      let totalFilesLoaded = 0;
+      let totalRecordsLoaded = 0;
+      let migrationCount = 0;
+      let mergeCount = 0;
+
+      if (!fs.existsSync(this.dataDir)) {
+        logger.info("No redial queue directory found, creating", {
+          path: this.dataDir,
+        });
+        return;
+      }
+
+      const files = fs.readdirSync(this.dataDir);
+
+      for (const file of files) {
+        if (!file.startsWith("redial-queue_") || !file.endsWith(".json")) {
+          continue;
+        }
+
+        const filePath = path.join(this.dataDir, file);
+
+        try {
+          const data = fs.readFileSync(filePath, "utf-8");
+          const parsed = JSON.parse(data);
+
+          let fileRecordCount = 0;
+
+          for (const [oldKey, record] of Object.entries<any>(parsed)) {
+            // Skip records outside retention period
+            if (record.created_at < cutoffTimestamp) {
+              continue;
+            }
+
+            fileRecordCount++;
+            totalRecordsLoaded++;
+
+            // MIGRATION: Add new daily tracking fields if missing (from old format)
+            if (!record.attempts_today) {
+              record.attempts_today = 0; // Will be set correctly by resetDailyCountersIfNeeded()
+            }
+            if (!record.last_attempt_date) {
+              record.last_attempt_date = ""; // Will be set on next call
+            }
+            if (record.status === "max_attempts") {
+              // Old status - migrate to daily_max_reached
+              record.status = "daily_max_reached";
+            }
+
+            // Generate new key (phone-only)
+            const newKey = this.generateKey(record.lead_id, record.phone_number);
+
+            // Check if we already have a record with this phone number from another file
+            const existing = allRecords.get(newKey);
+
+            if (existing) {
+              // MERGE: Keep the record with more attempts or more recent
+              if (record.attempts > existing.attempts || record.updated_at > existing.updated_at) {
+                allRecords.set(newKey, record as RedialRecord);
+                logger.warn("Merged duplicate record across files - keeping most recent/complete", {
+                  phone: record.phone_number,
+                  kept_attempts: record.attempts,
+                  discarded_attempts: existing.attempts,
+                  kept_file: file,
+                });
+              }
+              mergeCount++;
+            } else {
+              allRecords.set(newKey, record as RedialRecord);
+              if (oldKey !== newKey) {
+                migrationCount++;
+              }
+            }
+          }
+
+          if (fileRecordCount > 0) {
+            totalFilesLoaded++;
+            logger.debug("Loaded records from file", {
+              file,
+              records_loaded: fileRecordCount,
+            });
+          }
+        } catch (error: any) {
+          logger.error("Failed to load redial queue file", {
+            file,
+            error: error.message,
+          });
+        }
+      }
+
+      this.records = allRecords;
+
+      logger.info("Loaded all recent redial queue records", {
+        files_loaded: totalFilesLoaded,
+        total_records: allRecords.size,
+        retention_days: this.queueConfig.retention_days,
+        cutoff_date: new Date(cutoffTimestamp).toISOString(),
+        migrated_keys: migrationCount,
+        merged_duplicates: mergeCount,
+      });
+
+      // Save to current month file if migration occurred
+      if (migrationCount > 0 || mergeCount > 0) {
+        await this.saveRecords();
+        logger.info("Saved migrated/merged records to current month file", {
+          migrated: migrationCount,
+          merged: mergeCount,
+        });
+      }
+    } catch (error: any) {
+      logger.error("Failed to load all recent redial queue records", {
+        error: error.message,
       });
     } finally {
       this.fileLock = false;
@@ -463,7 +645,21 @@ class RedialQueueService {
       existing.first_name = firstName; // Use most recent name
       existing.last_name = lastName;
       existing.state = state; // Use most recent state
+
+      // Update lifetime attempts counter
       existing.attempts += 1;
+
+      // Update daily attempts counter
+      const today = this.getCurrentDateEST();
+      if (existing.last_attempt_date === today) {
+        // Same day - increment today's counter
+        existing.attempts_today += 1;
+      } else {
+        // New day - reset today's counter
+        existing.attempts_today = 1;
+        existing.last_attempt_date = today;
+      }
+
       existing.last_call_timestamp = now;
       existing.last_outcome = outcome;
       existing.outcomes.push(outcome);
@@ -487,16 +683,25 @@ class RedialQueueService {
         existing.status = "pending";
       }
 
-      // Check if max attempts reached
-      if (existing.attempts >= this.queueConfig.max_redial_attempts) {
-        existing.status = "max_attempts";
+      // Check if daily max attempts reached
+      if (existing.attempts_today >= this.queueConfig.max_daily_attempts) {
+        existing.status = "daily_max_reached";
+        existing.daily_max_reached_at = now;
+        logger.info("Lead reached daily max attempts - will retry tomorrow", {
+          lead_id: leadId,
+          phone: phoneNumber,
+          attempts_today: existing.attempts_today,
+          total_lifetime: existing.attempts,
+          max_daily: this.queueConfig.max_daily_attempts,
+        });
       }
 
       logger.info("Updated redial queue record", {
         lead_id: leadId,
         phone: phoneNumber,
-        attempts: existing.attempts,
-        max: this.queueConfig.max_redial_attempts,
+        attempts_lifetime: existing.attempts,
+        attempts_today: existing.attempts_today,
+        max_daily: this.queueConfig.max_daily_attempts,
         status: existing.status,
         next_redial: new Date(existing.next_redial_timestamp).toISOString(),
         next_interval_minutes: this.getProgressiveInterval(existing.attempts, existing.created_at),
@@ -511,6 +716,7 @@ class RedialQueueService {
         ? 2 * 60 * 1000 // 2 minutes minimum
         : firstIntervalMinutes * 60 * 1000;
 
+      const today = this.getCurrentDateEST();
       const newRecord: RedialRecord = {
         lead_id: leadId,
         phone_number: phoneNumber,
@@ -518,7 +724,9 @@ class RedialQueueService {
         first_name: firstName,
         last_name: lastName,
         state: state,
-        attempts: 1,
+        attempts: 1, // Lifetime counter
+        attempts_today: 1, // Daily counter (first call today)
+        last_attempt_date: today, // Track which day this was
         last_call_timestamp: now,
         next_redial_timestamp: scheduledCallbackTime || (now + actualIntervalMs),
         scheduled_callback_time: scheduledCallbackTime,
@@ -633,15 +841,18 @@ class RedialQueueService {
     try {
       const now = this.getNowEST();
 
-      // Safety Check #4: Reload current month records to get latest data
-      await this.loadCurrentMonthRecords();
+      // Safety Check #4: Reload ALL recent records to get latest data (within retention period)
+      await this.loadAllRecentRecords();
+
+      // Safety Check #5: Reset daily counters if new day detected
+      await this.resetDailyCountersIfNeeded();
 
       // SAFE FILTERING: Multiple validation layers
       const allRecords = Array.from(this.records.values());
 
       logger.info("Redial queue processing started", {
         total_records: allRecords.length,
-        max_attempts: this.queueConfig.max_redial_attempts,
+        max_daily_attempts: this.queueConfig.max_daily_attempts,
         current_time: new Date(now).toISOString(),
       });
 
@@ -674,7 +885,7 @@ class RedialQueueService {
           return record.scheduled_callback_time <= now;
         }
 
-        // All other statuses (completed, max_attempts, paused) are not favorable
+        // All other statuses (completed, daily_max_reached, paused) are not favorable
         return false;
       });
 
@@ -682,38 +893,39 @@ class RedialQueueService {
         favorable_records: favorableRecords.length,
         pending: favorableRecords.filter(r => r.status === "pending").length,
         rescheduled_ready: favorableRecords.filter(r => r.status === "rescheduled").length,
+        daily_max_reached: favorableRecords.filter(r => r.status === "daily_max_reached").length,
       });
 
-      // Filter #3: Only records under max attempts
-      const underMaxAttempts = favorableRecords.filter((record) => {
-        if (!record || typeof record.attempts !== "number") return false;
-        return record.attempts < this.queueConfig.max_redial_attempts;
+      // Filter #3: Only records under daily max attempts (no lifetime max - call until success!)
+      const underDailyMax = favorableRecords.filter((record) => {
+        if (!record || typeof record.attempts_today !== "number") return false;
+        return record.attempts_today < this.queueConfig.max_daily_attempts;
       });
 
-      logger.debug("Filtered to under max attempts", {
-        under_max: underMaxAttempts.length,
-        max_attempts: this.queueConfig.max_redial_attempts,
+      logger.debug("Filtered to under daily max attempts", {
+        under_daily_max: underDailyMax.length,
+        max_daily_attempts: this.queueConfig.max_daily_attempts,
       });
 
       // Filter #4: Only records that are due for redial (timestamp passed)
-      const readyLeads = underMaxAttempts.filter((record) => {
+      const readyLeads = underDailyMax.filter((record) => {
         if (!record || typeof record.next_redial_timestamp !== "number") return false;
         return record.next_redial_timestamp <= now;
       });
 
-      // Categorize ready leads by attempt number for visibility
-      const leadsByAttempt = new Map<number, number>();
+      // Categorize ready leads by daily attempt number for visibility
+      const leadsByDailyAttempt = new Map<number, number>();
       for (const lead of readyLeads) {
-        const attemptNum = (lead.attempts || 0) + 1; // Next attempt number
-        leadsByAttempt.set(attemptNum, (leadsByAttempt.get(attemptNum) || 0) + 1);
+        const attemptNum = (lead.attempts_today || 0) + 1; // Next daily attempt number
+        leadsByDailyAttempt.set(attemptNum, (leadsByDailyAttempt.get(attemptNum) || 0) + 1);
       }
 
       // Convert to sorted array for logging
       const attemptDistribution: Record<string, number> = {};
-      Array.from(leadsByAttempt.keys())
+      Array.from(leadsByDailyAttempt.keys())
         .sort((a, b) => a - b)
         .forEach((attemptNum) => {
-          attemptDistribution[`attempt_${attemptNum}`] = leadsByAttempt.get(attemptNum) || 0;
+          attemptDistribution[`daily_attempt_${attemptNum}`] = leadsByDailyAttempt.get(attemptNum) || 0;
         });
 
       logger.info("Redial queue ready leads identified", {
@@ -722,7 +934,7 @@ class RedialQueueService {
           total: allRecords.length,
           within_retention: withinRetentionRecords.length,
           favorable_status: favorableRecords.length,
-          under_max_attempts: underMaxAttempts.length,
+          under_daily_max: underDailyMax.length,
           time_ready: readyLeads.length,
         },
         attempt_distribution: attemptDistribution,
@@ -751,15 +963,17 @@ class RedialQueueService {
             continue;
           }
 
-          // PRE-CALL SAFETY CHECK #1: Verify record still under max attempts
-          if (lead.attempts >= this.queueConfig.max_redial_attempts) {
-            logger.warn("Lead reached max attempts since filtering, skipping", {
+          // PRE-CALL SAFETY CHECK #1: Verify record still under daily max attempts
+          if (lead.attempts_today >= this.queueConfig.max_daily_attempts) {
+            logger.warn("Lead reached daily max attempts since filtering, skipping until tomorrow", {
               lead_id: lead.lead_id,
               phone: lead.phone_number,
-              attempts: lead.attempts,
-              max: this.queueConfig.max_redial_attempts,
+              attempts_today: lead.attempts_today,
+              attempts_lifetime: lead.attempts,
+              max_daily: this.queueConfig.max_daily_attempts,
             });
-            lead.status = "max_attempts";
+            lead.status = "daily_max_reached";
+            lead.daily_max_reached_at = now;
             await this.saveRecords();
             skippedCount++;
             continue;
@@ -826,8 +1040,9 @@ class RedialQueueService {
           logger.info("CALLING: All safety checks passed, initiating redial", {
             lead_id: lead.lead_id,
             phone: lead.phone_number,
-            attempt_number: lead.attempts + 1,
-            max_attempts: this.queueConfig.max_redial_attempts,
+            attempt_number_today: lead.attempts_today + 1,
+            attempt_number_lifetime: lead.attempts + 1,
+            max_daily_attempts: this.queueConfig.max_daily_attempts,
             last_outcome: lead.last_outcome,
             time_since_last_call: Math.floor((now - lead.last_call_timestamp) / 60000) + " minutes",
           });
@@ -958,7 +1173,7 @@ class RedialQueueService {
     pending: number;
     rescheduled: number;
     completed: number;
-    max_attempts: number;
+    daily_max_reached: number;
     paused: number;
     ready_to_dial: number;
     current_month: string;
@@ -972,13 +1187,13 @@ class RedialQueueService {
       pending: records.filter((r) => r.status === "pending").length,
       rescheduled: records.filter((r) => r.status === "rescheduled").length,
       completed: records.filter((r) => r.status === "completed").length,
-      max_attempts: records.filter((r) => r.status === "max_attempts").length,
+      daily_max_reached: records.filter((r) => r.status === "daily_max_reached").length,
       paused: records.filter((r) => r.status === "paused").length,
       ready_to_dial: records.filter(
         (r) =>
           (r.status === "pending" || r.status === "rescheduled") &&
           r.next_redial_timestamp <= now &&
-          r.attempts < this.queueConfig.max_redial_attempts
+          r.attempts_today < this.queueConfig.max_daily_attempts
       ).length,
       current_month: this.currentMonth,
     };
@@ -1006,7 +1221,7 @@ class RedialQueueService {
         (r) =>
           (r.status === "pending" || r.status === "rescheduled") &&
           r.next_redial_timestamp <= now &&
-          r.attempts < this.queueConfig.max_redial_attempts
+          r.attempts_today < this.queueConfig.max_daily_attempts
       );
     }
 
@@ -1150,7 +1365,7 @@ class RedialQueueService {
       is_processing: this.isProcessing,
       interval_minutes: this.queueConfig.process_interval_minutes,
       redial_interval_minutes: this.queueConfig.redial_interval_minutes,
-      max_attempts: this.queueConfig.max_redial_attempts,
+      max_attempts: this.queueConfig.max_daily_attempts,
     };
   }
 }

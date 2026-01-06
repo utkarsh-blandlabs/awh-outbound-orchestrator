@@ -5,6 +5,7 @@ import { metricsCollector } from "../utils/metricsCollector";
 import { CallStateManager } from "../services/callStateManager";
 import { handleAwhOutbound } from "../logic/awhOrchestrator";
 import { ConvosoWebhookPayload } from "../types/awh";
+import { webhookLogger } from "../services/webhookLogger";
 
 const router = Router();
 
@@ -21,6 +22,17 @@ router.post("/awhealth-outbound", async (req: Request, res: Response) => {
   try {
     const payload = validatePayload(req.body);
 
+    // Log the webhook request
+    webhookLogger.logRequest(
+      requestId,
+      payload.phone_number,
+      payload.lead_id,
+      payload.list_id,
+      payload.first_name,
+      payload.last_name,
+      payload.state
+    );
+
     handleAwhOutbound(payload, requestId)
       .then((result) => {
         const durationMs = Date.now() - startTime;
@@ -31,6 +43,8 @@ router.post("/awhealth-outbound", async (req: Request, res: Response) => {
             lead_id: result.lead_id,
             call_id: result.call_id,
           });
+
+          webhookLogger.logProcessingResult(requestId, true);
 
           metricsCollector.recordRequest(
             requestId,
@@ -45,6 +59,8 @@ router.post("/awhealth-outbound", async (req: Request, res: Response) => {
             request_id: requestId,
             error: result.error,
           });
+
+          webhookLogger.logProcessingResult(requestId, false, result.error);
 
           errorLogger.logError(
             requestId,
@@ -73,6 +89,8 @@ router.post("/awhealth-outbound", async (req: Request, res: Response) => {
           request_id: requestId,
           error: error.message,
         });
+
+        webhookLogger.logProcessingResult(requestId, false, error.message);
 
         errorLogger.logError(
           requestId,
@@ -106,6 +124,8 @@ router.post("/awhealth-outbound", async (req: Request, res: Response) => {
       request_id: requestId,
       error: error.message,
     });
+
+    webhookLogger.logValidationFailure(requestId, error.message);
 
     errorLogger.logError(
       requestId,
