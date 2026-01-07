@@ -155,7 +155,7 @@ async function fetchPageWithRetry(page, retryCount = 0) {
   const options = {
     hostname: 'api.bland.ai',
     port: 443,
-    path: `/v1/calls?page=${page}&limit=100`,
+    path: `/v1/calls?page=${page}&limit=1000`,  // Increased from 100 to 1000 (10x faster)
     method: 'GET',
     headers: {
       'Authorization': BLAND_API_KEY,
@@ -225,6 +225,7 @@ async function processBlandCallsIncremental() {
 
   console.log(`Date range: ${START_DATE} to ${END_DATE}`);
   console.log(`Timestamp range: ${startTimestamp} to ${endTimestamp}`);
+  console.log(`Batch size: 1000 calls/page (10x faster than v1)`);
   console.log(`Retry config: Max ${MAX_RETRIES} retries, ${BLAND_BATCH_DELAY_MS}ms delay\n`);
 
   // Try to resume from previous run
