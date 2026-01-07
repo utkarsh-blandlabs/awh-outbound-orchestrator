@@ -138,31 +138,34 @@ node get-total-leads.js
 
 ---
 
-### 4. `backfill-from-bland.js` ⭐ **CRITICAL** (RECOMMENDED)
+### 4. `backfill-from-bland-optimized.js` ⭐ **CRITICAL** (RECOMMENDED)
 **Purpose**: ONE-TIME backfill script - pulls leads directly from Bland.ai API
+
+**FIXED** (Jan 7, 2026):
+- 🐛 Memory leak fixed - no longer stores all 300k+ calls in memory
+- 🐛 Duplicate handling fixed - keeps LATEST call per phone (not first)
+- ⚡ Incremental processing - processes page-by-page without accumulating
+- 💾 2GB heap size allocated to handle large datasets safely
 
 **Features**:
 - ✅ Pulls ALL calls from Bland.ai (Dec 1, 2025 - Jan 7, 2026)
 - ✅ Checks status in Convoso for each lead
 - ✅ Only adds non-sale/non-DNC leads to queue
-- ✅ Memory optimized (periodic saves, GC enabled)
+- ✅ Keeps LATEST call per phone number (if called multiple times)
+- ✅ Memory optimized (incremental processing, forced GC)
 - ✅ Rate limit safe (batched API calls)
-- ✅ Handles duplicate phone numbers (first match)
-- ✅ Progress tracking with ETA
+- ✅ Progress tracking with memory monitoring
 - ✅ Dry-run mode for testing
 
 **Run**:
 ```bash
-# Using npm scripts (RECOMMENDED - enables GC):
+# Using npm scripts (RECOMMENDED - allocates 2GB heap + GC):
 npm run backfill:dry-run    # Test run (no changes)
 npm run backfill             # Real run
 
 # Or directly:
-node --expose-gc backfill-from-bland.js --dry-run
-node --expose-gc backfill-from-bland.js
-
-# Custom batch size (default: 50)
-node --expose-gc backfill-from-bland.js --batch-size=30
+node --max-old-space-size=2048 --expose-gc backfill-from-bland-optimized.js --dry-run
+node --max-old-space-size=2048 --expose-gc backfill-from-bland-optimized.js
 ```
 
 **Output**:

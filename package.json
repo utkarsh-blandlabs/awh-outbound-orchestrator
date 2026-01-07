@@ -18,8 +18,9 @@
     "start": "node build/index.js",
     "lint": "echo 'No linting configured yet'",
     "test": "echo 'No tests configured yet'",
-    "backfill": "node --expose-gc backfill-from-bland.js",
-    "backfill:dry-run": "node --expose-gc backfill-from-bland.js --dry-run",
+    "backfill": "node --max-old-space-size=2048 --expose-gc backfill-from-bland-optimized.js",
+    "backfill:dry-run": "node --max-old-space-size=2048 --expose-gc backfill-from-bland-optimized.js --dry-run",
+    "backfill:old": "node --expose-gc backfill-from-bland.js",
     "report:breakdown": "node get-detailed-breakdown.js",
     "report:date-range": "node get-date-range-report.js",
     "report:total": "node get-total-leads.js"
