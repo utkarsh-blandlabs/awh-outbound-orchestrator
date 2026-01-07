@@ -17,7 +17,12 @@
     "build": "tsc",
     "start": "node build/index.js",
     "lint": "echo 'No linting configured yet'",
-    "test": "echo 'No tests configured yet'"
+    "test": "echo 'No tests configured yet'",
+    "backfill": "node --expose-gc backfill-from-bland.js",
+    "backfill:dry-run": "node --expose-gc backfill-from-bland.js --dry-run",
+    "report:breakdown": "node get-detailed-breakdown.js",
+    "report:date-range": "node get-date-range-report.js",
+    "report:total": "node get-total-leads.js"
   },
   "dependencies": {
     "axios": "^1.7.0",

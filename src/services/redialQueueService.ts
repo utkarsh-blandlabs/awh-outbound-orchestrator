@@ -192,32 +192,18 @@ class RedialQueueService {
   }
 
   /**
-   * Get redial interval based on lead age (days since creation)
-   * Uses three-tier system: Day 0 (45min), Day 1 (120min), Day 2+ (240min)
+   * Get redial interval based on attempt number
+   * Uses REDIAL_PROGRESSIVE_INTERVALS from env file consistently across all days
+   * Example: [0, 2, 5, 10, 30, 60, 120] minutes
    */
-  private getProgressiveInterval(attemptNumber: number, createdAtTimestamp?: number): number {
-    // If no created_at provided, fall back to old progressive intervals
-    if (!createdAtTimestamp) {
-      const intervals = this.queueConfig.progressive_intervals;
-      const index = attemptNumber - 1;
-      if (index < 0) return intervals[0] || 0;
-      if (index >= intervals.length) return intervals[intervals.length - 1] || 120;
-      return intervals[index] || 30;
-    }
+  private getProgressiveInterval(attemptNumber: number): number {
+    // Use progressive intervals from config for all attempts, regardless of day
+    const intervals = this.queueConfig.progressive_intervals;
+    const index = attemptNumber - 1;
 
-    // Use day-based intervals
-    const daysSinceCreation = this.getLeadDaysSinceCreation(createdAtTimestamp);
-
-    if (daysSinceCreation === 0) {
-      // Same day: aggressive (45 min)
-      return this.queueConfig.day0_interval_minutes;
-    } else if (daysSinceCreation === 1) {
-      // Day 1: moderate (120 min / 2 hours)
-      return this.queueConfig.day1_interval_minutes;
-    } else {
-      // Day 2+: gentle (240 min / 4 hours)
-      return this.queueConfig.day2_plus_interval_minutes;
-    }
+    if (index < 0) return intervals[0] || 0;
+    if (index >= intervals.length) return intervals[intervals.length - 1] || 120;
+    return intervals[index] || 30;
   }
 
   private ensureDirectories(): void {
@@ -672,8 +658,8 @@ class RedialQueueService {
         existing.scheduled_callback_time = scheduledCallbackTime;
         existing.status = "rescheduled";
       } else {
-        // Use day-based interval (days since lead creation)
-        const intervalMinutes = this.getProgressiveInterval(existing.attempts, existing.created_at);
+        // Use progressive interval based on attempt number
+        const intervalMinutes = this.getProgressiveInterval(existing.attempts);
         // IMPORTANT: Add minimum 2-minute delay even for "instant" (0 min) intervals
         // This prevents race conditions where call is still active/completing
         const actualIntervalMs = intervalMinutes === 0
@@ -704,12 +690,12 @@ class RedialQueueService {
         max_daily: this.queueConfig.max_daily_attempts,
         status: existing.status,
         next_redial: new Date(existing.next_redial_timestamp).toISOString(),
-        next_interval_minutes: this.getProgressiveInterval(existing.attempts, existing.created_at),
+        next_interval_minutes: this.getProgressiveInterval(existing.attempts),
         days_since_creation: this.getLeadDaysSinceCreation(existing.created_at),
       });
     } else {
-      // Create new record with day-based interval for first attempt
-      const firstIntervalMinutes = this.getProgressiveInterval(1, now);
+      // Create new record with progressive interval for first attempt
+      const firstIntervalMinutes = this.getProgressiveInterval(1);
       // IMPORTANT: Add minimum 2-minute delay even for "instant" (0 min) intervals
       // This prevents race conditions where call is still active/completing
       const actualIntervalMs = firstIntervalMinutes === 0
@@ -1081,9 +1067,9 @@ class RedialQueueService {
             stack: error.stack,
           });
 
-          // Safe error recovery: Schedule retry with day-based interval
+          // Safe error recovery: Schedule retry with progressive interval
           try {
-            const retryIntervalMinutes = this.getProgressiveInterval(lead.attempts + 1, lead.created_at);
+            const retryIntervalMinutes = this.getProgressiveInterval(lead.attempts + 1);
             const retryIntervalMs = retryIntervalMinutes === 0
               ? 2 * 60 * 1000 // Minimum 2 minutes
               : retryIntervalMinutes * 60 * 1000;

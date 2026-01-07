@@ -85,11 +85,7 @@ class BlandService {
       : "";
 
     // Add callback number to voicemail if not already included
-    const voicemailWithCallback = voicemailMessage && formattedCallback
-      ? (voicemailMessage.includes(formattedCallback)
-          ? voicemailMessage
-          : `${voicemailMessage} Call me at ${formattedCallback}.`)
-      : voicemailMessage;
+    const voicemailWithCallback = voicemailMessage ?? "";
 
     const smsMessage = config.bland.smsMessage
       ? config.bland.smsMessage
@@ -99,7 +95,8 @@ class BlandService {
 
     // Check if we can send SMS (limit 1-2 per day per number)
     const canSendSms = smsTrackerService.canSendSms(payload.phoneNumber);
-    const shouldIncludeSms = config.bland.smsEnabled &&
+    const shouldIncludeSms =
+      config.bland.smsEnabled &&
       config.bland.smsFrom &&
       smsMessage &&
       canSendSms;
@@ -171,7 +168,6 @@ class BlandService {
       // Additional settings
       wait: false, // Don't wait for call to complete (async)
     };
-
 
     try {
       const response = await retry(
