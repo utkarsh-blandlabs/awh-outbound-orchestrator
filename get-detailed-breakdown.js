@@ -62,15 +62,21 @@ try {
   );
 
   // 2. Completed with SALE/TRANSFER/ACA (successful outcomes)
+  // NOTE: TRANSFERRED leads (without sale) should STILL be redialed!
   const completedWithSale = leadsInPeriod.filter(
     r => r.status === 'completed' &&
-    (r.last_outcome === 'TRANSFERRED' ||
-     r.last_outcome === 'SALE' ||
+    (r.last_outcome === 'SALE' ||
      r.last_outcome === 'ACA' ||
-     (r.last_outcome && r.last_outcome.includes('TRANSFER')))
+     (r.last_outcome && (r.last_outcome.includes('SALE') || r.last_outcome.includes('ACA'))))
   );
 
-  // 3. Completed with DNC/NOT_INTERESTED
+  // TRANSFERRED but not sale - should continue redialing
+  const transferredNotSale = leadsInPeriod.filter(
+    r => (r.last_outcome === 'TRANSFERRED' || (r.last_outcome && r.last_outcome.includes('TRANSFER'))) &&
+    !(r.last_outcome && (r.last_outcome.includes('SALE') || r.last_outcome.includes('ACA')))
+  );
+
+  // 3. Completed with DNC/NOT_INTERESTED (only these stop redialing)
   const completedWithDNC = leadsInPeriod.filter(
     r => r.status === 'completed' &&
     (r.last_outcome === 'DNC' ||
@@ -82,20 +88,25 @@ try {
   // 4. Completed with other outcomes (voicemail, no answer, callback, etc.)
   const completedWithOther = leadsInPeriod.filter(
     r => r.status === 'completed' &&
-    r.last_outcome !== 'TRANSFERRED' &&
     r.last_outcome !== 'SALE' &&
     r.last_outcome !== 'ACA' &&
     r.last_outcome !== 'DNC' &&
     r.last_outcome !== 'NOT_INTERESTED' &&
     r.last_outcome !== 'DO_NOT_CALL' &&
-    !(r.last_outcome && (r.last_outcome.includes('TRANSFER') || r.last_outcome.includes('DNC') || r.last_outcome.includes('NOT_INTERESTED')))
+    !(r.last_outcome && (r.last_outcome.includes('SALE') || r.last_outcome.includes('ACA') || r.last_outcome.includes('DNC') || r.last_outcome.includes('NOT_INTERESTED')))
   );
 
-  // Non-sale = Active + Completed with other outcomes (but not DNC)
-  const totalNonSale = activeForRedialing.length + completedWithOther.length;
+  // CRITICAL: Only SALE and DNC stop redialing!
+  // Everything else (TRANSFERRED, VOICEMAIL, NO_ANSWER, etc.) continues redialing
 
-  // Non-DNC = Active + Completed with sale + Completed with other outcomes
-  const totalNonDNC = activeForRedialing.length + completedWithSale.length + completedWithOther.length;
+  // Leads that SHOULD continue redialing (non-sale, non-DNC)
+  const shouldContinueRedialing = activeForRedialing.length + transferredNotSale.length + completedWithOther.length;
+
+  // Total non-sale = Everything except SALE
+  const totalNonSale = leadsInPeriod.length - completedWithSale.length;
+
+  // Total non-DNC = Everything except DNC
+  const totalNonDNC = leadsInPeriod.length - completedWithDNC.length;
 
   // ============================================================================
   // ALL-TIME STATS FOR COMPARISON
@@ -128,27 +139,32 @@ try {
   console.log(`1. Active for redialing:           ${activeForRedialing.length}`);
   console.log(`   (pending/rescheduled/daily_max)`);
   console.log('');
-  console.log(`2. Completed with SALE/TRANSFER:   ${completedWithSale.length}`);
-  console.log(`   (successful outcomes)`);
+  console.log(`2. TRANSFERRED (not sale yet):     ${transferredNotSale.length}`);
+  console.log(`   (still needs redialing!)`);
   console.log('');
-  console.log(`3. Completed with DNC:             ${completedWithDNC.length}`);
-  console.log(`   (do not call / not interested)`);
+  console.log(`3. Completed with SALE:            ${completedWithSale.length}`);
+  console.log(`   (STOPS redialing)`);
   console.log('');
-  console.log(`4. Completed with other outcomes:  ${completedWithOther.length}`);
+  console.log(`4. Completed with DNC:             ${completedWithDNC.length}`);
+  console.log(`   (STOPS redialing)`);
+  console.log('');
+  console.log(`5. Completed with other outcomes:  ${completedWithOther.length}`);
   console.log(`   (voicemail, no answer, etc.)`);
   console.log('');
 
-  console.log('🎯 SUMMARY METRICS:');
+  console.log('🎯 CRITICAL METRICS:');
   console.log('─────────────────────────────────────────');
+  console.log(`SHOULD CONTINUE REDIALING:         ${shouldContinueRedialing}`);
+  console.log(`  (active + transferred + other)`);
+  console.log('');
   console.log(`Total NON-SALE:                    ${totalNonSale}`);
-  console.log(`  (active + other outcomes)`);
+  console.log(`  (everything except SALE)`);
   console.log('');
   console.log(`Total NON-DNC:                     ${totalNonDNC}`);
-  console.log(`  (active + sale + other outcomes)`);
+  console.log(`  (everything except DNC)`);
   console.log('');
-  console.log(`Total DNC:                         ${completedWithDNC.length}`);
-  console.log('');
-  console.log(`Still for redialing:               ${activeForRedialing.length}`);
+  console.log(`Total SALE (stops redialing):      ${completedWithSale.length}`);
+  console.log(`Total DNC (stops redialing):       ${completedWithDNC.length}`);
   console.log('');
 
   console.log('===========================================');
@@ -165,11 +181,17 @@ try {
   console.log('===========================================');
   console.log(`Period: ${START_DATE} to ${END_DATE}`);
   console.log('');
-  console.log(`1. Total leads in period:          ${leadsInPeriod.length}`);
-  console.log(`2. Still for redialing:            ${activeForRedialing.length}`);
-  console.log(`3. Total non-sale:                 ${totalNonSale}`);
-  console.log(`4. Total non-DNC:                  ${totalNonDNC}`);
-  console.log(`5. Total DNC:                      ${completedWithDNC.length}`);
+  console.log(`1. Total leads in period:                 ${leadsInPeriod.length}`);
+  console.log(`2. Should continue redialing:             ${shouldContinueRedialing}`);
+  console.log(`   (active + transferred + other)`);
+  console.log(`3. Total non-sale:                        ${totalNonSale}`);
+  console.log(`4. Total non-DNC:                         ${totalNonDNC}`);
+  console.log(`5. Total SALE:                            ${completedWithSale.length}`);
+  console.log(`6. Total DNC:                             ${completedWithDNC.length}`);
+  console.log('');
+  console.log(`💡 KEY INSIGHT:`);
+  console.log(`   Only SALE (${completedWithSale.length}) and DNC (${completedWithDNC.length}) stop redialing.`);
+  console.log(`   Everything else (${shouldContinueRedialing}) continues 8x/day.`);
   console.log('===========================================\n');
 
   // Detailed outcome breakdown
@@ -199,12 +221,13 @@ try {
     period_stats: {
       total_leads: leadsInPeriod.length,
       active_for_redialing: activeForRedialing.length,
+      transferred_not_sale: transferredNotSale.length,
+      should_continue_redialing: shouldContinueRedialing,
       completed_with_sale: completedWithSale.length,
       completed_with_dnc: completedWithDNC.length,
       completed_with_other: completedWithOther.length,
       total_non_sale: totalNonSale,
-      total_non_dnc: totalNonDNC,
-      total_dnc: completedWithDNC.length
+      total_non_dnc: totalNonDNC
     },
     all_time_stats: {
       total_leads: allTimeLeads.length,
@@ -212,6 +235,7 @@ try {
       completed: allTimeCompleted.length,
       dnc: allTimeDNC.length
     },
+    expected_daily_calls: shouldContinueRedialing * 8,
     outcome_breakdown: outcomeMap
   };
 
