@@ -53,8 +53,10 @@ class RedialQueueService {
   private dataDir: string;
   private currentMonth: string;
   private processingInterval: NodeJS.Timeout | null = null;
+  private midnightResetInterval: NodeJS.Timeout | null = null;
   private isProcessing: boolean = false;
   private fileLock: boolean = false;
+  private lastResetDate: string = "";
 
   constructor() {
     this.dataDir = path.join(process.cwd(), "data", "redial-queue");
@@ -104,6 +106,7 @@ class RedialQueueService {
     // Auto-start if enabled
     if (this.queueConfig.enabled) {
       this.startProcessor();
+      this.startMidnightResetScheduler();
     }
 
     logger.info("Redial queue service initialized", {
@@ -112,6 +115,7 @@ class RedialQueueService {
       max_daily_attempts: this.queueConfig.max_daily_attempts,
       daily_reset_hour: this.queueConfig.daily_reset_hour,
       success_outcomes: this.queueConfig.success_outcomes,
+      midnight_reset_enabled: true,
     });
   }
 
@@ -153,6 +157,65 @@ class RedialQueueService {
         leads_reset: resetCount,
       });
     }
+  }
+
+  /**
+   * Start midnight reset scheduler
+   * Runs every minute to check if it's midnight (12:01 AM EST) and resets daily counters
+   */
+  private startMidnightResetScheduler(): void {
+    // Check every 1 minute for midnight
+    this.midnightResetInterval = setInterval(async () => {
+      try {
+        const now = new Date();
+        const options: Intl.DateTimeFormatOptions = {
+          timeZone: "America/New_York",
+          hour: "2-digit",
+          minute: "2-digit",
+          hour12: false,
+        };
+
+        const formatter = new Intl.DateTimeFormat("en-US", options);
+        const parts = formatter.formatToParts(now);
+        const hour = parts.find((p) => p.type === "hour")?.value || "00";
+        const minute = parts.find((p) => p.type === "minute")?.value || "00";
+        const currentTime = `${hour}:${minute}`;
+        const today = this.getCurrentDateEST();
+
+        // Check if it's midnight (00:00 or 00:01) and we haven't reset today yet
+        if ((currentTime === "00:00" || currentTime === "00:01") && this.lastResetDate !== today) {
+          logger.info("Midnight detected - performing daily counter reset", {
+            time_est: currentTime,
+            date: today,
+            last_reset_date: this.lastResetDate,
+          });
+
+          // Reload all records to ensure we have latest data
+          await this.loadAllRecentRecords();
+
+          // Perform the reset
+          await this.resetDailyCountersIfNeeded();
+
+          // Mark that we've reset for this day
+          this.lastResetDate = today;
+
+          logger.info("Midnight reset completed successfully", {
+            date: today,
+            total_records: this.records.size,
+          });
+        }
+      } catch (error: any) {
+        logger.error("Error in midnight reset scheduler", {
+          error: error.message,
+          stack: error.stack,
+        });
+      }
+    }, 60000); // Check every 60 seconds
+
+    logger.info("Midnight reset scheduler started", {
+      check_interval_seconds: 60,
+      reset_hour_est: "00:01 AM",
+    });
   }
 
   /**
@@ -797,6 +860,12 @@ class RedialQueueService {
       this.processingInterval = null;
       logger.info("Redial queue processor stopped");
     }
+
+    if (this.midnightResetInterval) {
+      clearInterval(this.midnightResetInterval);
+      this.midnightResetInterval = null;
+      logger.info("Midnight reset scheduler stopped");
+    }
   }
 
   /**
@@ -1131,6 +1200,7 @@ class RedialQueueService {
     if (updates.enabled !== undefined && updates.enabled !== wasEnabled) {
       if (this.queueConfig.enabled && !this.processingInterval) {
         this.startProcessor();
+        this.startMidnightResetScheduler();
       } else if (!this.queueConfig.enabled && this.processingInterval) {
         this.stopProcessor();
       }
