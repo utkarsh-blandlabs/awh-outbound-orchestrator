@@ -155,6 +155,55 @@ export const config = {
 
   // Logging
   logLevel: process.env["LOG_LEVEL"] || "info",
+
+  // SMS Automation config (dynamic templates)
+  sms: {
+    enabled: process.env["SMS_AUTOMATION_ENABLED"] === "true",
+    // SMS message templates (4 messages)
+    message1: process.env["SMS_MESSAGE_1"] ||
+      "Hey {{first_name}}, your healthcare plan request has been received! We will be calling you shortly. Or if you prefer, Call us (561) 956-5858 and let's get you covered. Text STOP to be removed anytime.",
+    message2: process.env["SMS_MESSAGE_2"] ||
+      "At American Way Health we make the process simple and easy, Health Plans that fit you and your family's budget. Call (561) 956-5858 to learn more. Text STOP to be removed anytime.",
+    message3: process.env["SMS_MESSAGE_3"] ||
+      "{{first_name}}, we have health care plans with low premiums for individuals and families. Reach (561) 956-5858 to connect with a licensed agent. Text STOP to be removed anytime.",
+    message4: process.env["SMS_MESSAGE_4"] ||
+      "{{first_name}}, healthcare rates will increase next month. Get your rate saved today. Call (561) 956-5858 to connect with a licensed agent. Text STOP to be removed anytime.",
+    // Day gaps for sending messages (comma-separated)
+    dayGaps: (process.env["SMS_DAY_GAPS"] || "0,1,3,7")
+      .split(",")
+      .map(s => parseInt(s.trim()))
+      .filter(n => !isNaN(n)),
+    // Maximum number of messages to send (default 4)
+    maxMessages: parseInt(process.env["SMS_MAX_MESSAGES"] || "4"),
+    // TCPA compliance hours
+    startHour: parseInt(process.env["SMS_START_HOUR"] || "8"),
+    endHour: parseInt(process.env["SMS_END_HOUR"] || "21"),
+    // SMS triggers (Bland outcomes that trigger SMS)
+    triggers: (process.env["SMS_AUTOMATION_TRIGGERS"] || "VOICEMAIL,NO_ANSWER")
+      .split(",")
+      .map(s => s.trim().toUpperCase())
+      .filter(s => s.length > 0),
+  },
+
+  // Redial Daily Decay Schedule config
+  redialDecay: {
+    enabled: process.env["REDIAL_DECAY_ENABLED"] === "true",
+    // Daily call limits for each day (comma-separated)
+    // Example: "8,7,5,1,3,5,4,3,2,1,1,1..." for 30 days
+    dailySchedule: (process.env["REDIAL_DAILY_SCHEDULE"] ||
+      "8,7,5,3,5,4,3,2,2,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1")
+      .split(",")
+      .map(s => parseInt(s.trim()))
+      .filter(n => !isNaN(n) && n >= 0),
+    // Maximum total calls per lead per month
+    maxCallsPerMonth: parseInt(process.env["REDIAL_MAX_CALLS_PER_MONTH"] || "45"),
+    // Randomize call times throughout the day (avoid calling at same time)
+    randomizeTimes: process.env["REDIAL_RANDOMIZE_TIMES"] !== "false", // Enabled by default
+    // Minimum minutes between randomized calls (default 15 minutes)
+    minRandomMinutes: parseInt(process.env["REDIAL_MIN_RANDOM_MINUTES"] || "15"),
+    // Maximum minutes between randomized calls (default 120 minutes = 2 hours)
+    maxRandomMinutes: parseInt(process.env["REDIAL_MAX_RANDOM_MINUTES"] || "120"),
+  },
 };
 
 /**

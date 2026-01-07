@@ -8,6 +8,7 @@ import { logger } from "./utils/logger";
 import awhWebhookRouter from "./routes/awhWebhook";
 import blandWebhookRouter from "./routes/blandWebhook";
 import callbackWebhookRouter from "./routes/callbackWebhook";
+import smsWebhookRouter from "./routes/smsWebhook";
 import adminRouter from "./routes/adminRoutes";
 import blocklistRouter from "./routes/blocklistRoutes";
 import webhookLogRouter from "./routes/webhookLogRoutes";
@@ -17,6 +18,7 @@ import { versionService } from "./services/versionService";
 
 // Import services (they auto-start in their constructors)
 import "./services/queueProcessorService";
+import "./services/smsSchedulerService";
 
 // Validate environment variables
 validateConfig();
@@ -76,6 +78,7 @@ app.get("/health", (req: Request, res: Response) => {
 app.use("/webhooks", awhWebhookRouter);
 app.use("/webhooks", blandWebhookRouter);
 app.use("/webhooks", callbackWebhookRouter);
+app.use("/webhooks", smsWebhookRouter);
 
 // Admin API routes (for Retool dashboard)
 app.use("/api/admin", adminRouter);
@@ -130,6 +133,7 @@ const server = app.listen(PORT, () => {
   console.log(`  POST http://localhost:${PORT}/webhooks/awhealth-outbound`);
   console.log(`  POST http://localhost:${PORT}/webhooks/bland-callback`);
   console.log(`  POST http://localhost:${PORT}/webhooks/call-back`);
+  console.log(`  POST http://localhost:${PORT}/webhooks/sms-reply`);
   console.log("");
   console.log("Admin API endpoints:");
   console.log(`  GET  http://localhost:${PORT}/api/admin/calls/active`);
