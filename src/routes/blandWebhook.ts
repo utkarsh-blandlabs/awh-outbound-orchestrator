@@ -6,10 +6,40 @@ import { statisticsService } from "../services/statisticsService";
 import { dailyCallTracker } from "../services/dailyCallTrackerService";
 import { answeringMachineTracker } from "../services/answeringMachineTrackerService";
 import { redialQueueService } from "../services/redialQueueService";
+import { failedConvosoLogger } from "../services/failedConvosoLogger";
 import { config } from "../config";
 import { BlandTranscript, CallOutcome } from "../types/awh";
 
 const router = Router();
+
+// ============================================================================
+// Helper: Map outcome to Convoso status
+// (Duplicated from convosoService since that method is private)
+// ============================================================================
+function mapOutcomeToConvosoStatus(outcome: CallOutcome | string): string {
+  const normalizedOutcome = outcome.toString().toLowerCase();
+
+  // Map each outcome to corresponding Convoso status code
+  if (normalizedOutcome.includes("transfer")) return "TR";
+  if (normalizedOutcome.includes("sale") || normalizedOutcome.includes("aca"))
+    return "S";
+  if (normalizedOutcome.includes("callback")) return "CD";
+  if (normalizedOutcome.includes("voicemail")) return "A";
+  if (normalizedOutcome.includes("no_answer")) return "NA";
+  if (normalizedOutcome.includes("confused")) return "CD";
+  if (normalizedOutcome.includes("busy")) return "B";
+  if (
+    normalizedOutcome.includes("hang") ||
+    normalizedOutcome.includes("hangup")
+  )
+    return "CALLHU";
+  if (normalizedOutcome.includes("disconnect")) return "DC";
+  if (normalizedOutcome.includes("dead")) return "N";
+  if (normalizedOutcome.includes("wrong")) return "WRONG";
+  if (normalizedOutcome.includes("bad_phone")) return "BPN";
+
+  return "N"; // Default to N for unknown outcomes
+}
 
 // ============================================================================
 // IMPORTANT: Webhook Processing Behavior
@@ -258,6 +288,21 @@ async function processCallCompletion(
       lead_id: callState.lead_id,
       error: error.message,
     });
+
+    // Log failed update for manual backfill if lead doesn't exist in Convoso
+    // These can be created in Convoso later after confirming with Jeff
+    if (error.message && error.message.includes("No such Lead")) {
+      const convosoStatus = mapOutcomeToConvosoStatus(transcript.outcome);
+
+      failedConvosoLogger.logFailedUpdate(
+        callState.lead_id,
+        callState.list_id,
+        callState.phone_number,
+        transcript,
+        convosoStatus,
+        error.message
+      );
+    }
 
     // Record failure statistics
     statisticsService.recordCallFailure(error.message);
