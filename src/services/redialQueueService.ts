@@ -83,7 +83,7 @@ class RedialQueueService {
       ),
       success_outcomes: (
         process.env["REDIAL_SUCCESS_OUTCOMES"] ||
-        "TRANSFERRED,SALE,ACA,CALLBACK"
+        "SALE,ACA,DNC,NOT_INTERESTED,DO_NOT_CALL"
       )
         .split(",")
         .map((s) => s.trim().toUpperCase())
