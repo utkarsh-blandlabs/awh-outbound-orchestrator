@@ -1,5 +1,7 @@
 import { logger } from "../utils/logger";
 import { config } from "../config";
+import * as fs from "fs";
+import * as path from "path";
 
 interface PendingCall {
   call_id: string;
@@ -17,6 +19,93 @@ interface PendingCall {
 
 class CallStateManagerClass {
   private pendingCalls: Map<string, PendingCall> = new Map();
+  private persistenceFile: string;
+  private persistenceEnabled: boolean;
+  private lastPersistTime: number = 0;
+  private persistIntervalMs: number = 30000; // Save every 30 seconds
+
+  constructor() {
+    this.persistenceFile = path.join(process.cwd(), "data", "call-state-cache.json");
+    this.persistenceEnabled = process.env["CALL_STATE_PERSISTENCE_ENABLED"] !== "false"; // Enabled by default
+
+    // Load persisted state on startup
+    if (this.persistenceEnabled) {
+      this.loadPersistedState();
+
+      // Periodic persistence
+      setInterval(() => {
+        this.persistState();
+      }, this.persistIntervalMs);
+
+      logger.info("CallStateManager persistence enabled", {
+        file: this.persistenceFile,
+        interval_seconds: this.persistIntervalMs / 1000,
+      });
+    }
+  }
+
+  /**
+   * Load persisted call state from disk (hot restart recovery)
+   */
+  private loadPersistedState(): void {
+    try {
+      if (fs.existsSync(this.persistenceFile)) {
+        const data = fs.readFileSync(this.persistenceFile, "utf-8");
+        const persisted = JSON.parse(data);
+
+        // Restore pending calls
+        if (persisted.pendingCalls && Array.isArray(persisted.pendingCalls)) {
+          this.pendingCalls = new Map(persisted.pendingCalls);
+          logger.info("Restored call state from disk (hot restart recovery)", {
+            pending_calls_restored: this.pendingCalls.size,
+            file: this.persistenceFile,
+          });
+        }
+      }
+    } catch (error: any) {
+      logger.error("Failed to load persisted call state", {
+        error: error.message,
+        file: this.persistenceFile,
+      });
+    }
+  }
+
+  /**
+   * Persist current call state to disk (for hot restarts)
+   */
+  private persistState(): void {
+    if (!this.persistenceEnabled) return;
+
+    try {
+      const now = Date.now();
+
+      // Only persist if there are pending calls or if enough time has passed
+      if (this.pendingCalls.size === 0 && now - this.lastPersistTime < 60000) {
+        return;
+      }
+
+      const dir = path.dirname(this.persistenceFile);
+      if (!fs.existsSync(dir)) {
+        fs.mkdirSync(dir, { recursive: true });
+      }
+
+      const state = {
+        timestamp: now,
+        pendingCalls: Array.from(this.pendingCalls.entries()),
+      };
+
+      fs.writeFileSync(this.persistenceFile, JSON.stringify(state, null, 2), "utf-8");
+      this.lastPersistTime = now;
+
+      logger.debug("Persisted call state to disk", {
+        pending_calls: this.pendingCalls.size,
+      });
+    } catch (error: any) {
+      logger.error("Failed to persist call state", {
+        error: error.message,
+      });
+    }
+  }
 
   addPendingCall(
     callId: string,
@@ -49,6 +138,9 @@ class CallStateManagerClass {
       list_id: listId,
       pending_count: this.pendingCalls.size,
     });
+
+    // Persist immediately when adding new call
+    this.persistState();
   }
 
   getPendingCall(callId: string): PendingCall | null {
@@ -64,6 +156,8 @@ class CallStateManagerClass {
         duration_ms: Date.now() - call.created_at,
       });
       // Don't use setTimeout - cleanup interval will handle deletion
+      // Persist state change
+      this.persistState();
     }
   }
 
@@ -77,6 +171,8 @@ class CallStateManagerClass {
         error,
       });
       // Don't use setTimeout - cleanup interval will handle deletion
+      // Persist state change
+      this.persistState();
     }
   }
 
