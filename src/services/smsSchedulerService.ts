@@ -480,18 +480,20 @@ class SMSSchedulerService {
 
   /**
    * Send SMS via Bland AI API
+   * Uses correct Bland.ai SMS endpoint: POST /v1/sms/send
+   * Docs: https://docs.bland.ai/api-v1/post/sms-send
    */
   private async sendSMS(phoneNumber: string, message: string): Promise<string> {
     const response = await axios.post(
-      "https://api.bland.ai/v1/sms",
+      "https://api.bland.ai/v1/sms/send",
       {
-        phone_number: phoneNumber,
-        message: message,
-        from: config.bland.smsFrom || config.bland.from,
+        user_number: phoneNumber,
+        agent_number: config.bland.smsFrom || config.bland.from,
+        agent_message: message,
       },
       {
         headers: {
-          Authorization: config.bland.apiKey,
+          authorization: config.bland.apiKey,
           "Content-Type": "application/json",
         },
         timeout: 30000,
@@ -502,7 +504,7 @@ class SMSSchedulerService {
       throw new Error(`Bland AI SMS API returned status ${response.status}`);
     }
 
-    return response.data.sms_id || response.data.id || `sms_${Date.now()}`;
+    return response.data?.data?.message_id || response.data?.message_id || `sms_${Date.now()}`;
   }
 
   /**
