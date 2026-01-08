@@ -7,6 +7,7 @@ import { dailyCallTracker } from "../services/dailyCallTrackerService";
 import { answeringMachineTracker } from "../services/answeringMachineTrackerService";
 import { redialQueueService } from "../services/redialQueueService";
 import { failedConvosoLogger } from "../services/failedConvosoLogger";
+import { smsSchedulerService } from "../services/smsSchedulerService";
 import { config } from "../config";
 import { BlandTranscript, CallOutcome } from "../types/awh";
 
@@ -238,6 +239,37 @@ async function processCallCompletion(
       callState.call_id,
       scheduledCallbackTime
     );
+
+    // Add lead to SMS queue for VOICEMAIL or NO_ANSWER outcomes (if enabled)
+    if (config.sms.enabled && config.sms.triggers.includes(transcript.outcome)) {
+      try {
+        // Add to SMS queue - scheduler will check Bland conversation history before sending
+        smsSchedulerService.addLead({
+          lead_id: callState.lead_id,
+          phone_number: callState.phone_number,
+          list_id: callState.list_id,
+          first_name: callState.first_name,
+          last_name: callState.last_name,
+          state: callState.state,
+          last_outcome: transcript.outcome,
+          last_call_timestamp: Date.now(),
+        });
+
+        logger.info("Lead added to SMS queue", {
+          requestId,
+          lead_id: callState.lead_id,
+          phone: callState.phone_number,
+          outcome: transcript.outcome,
+        });
+      } catch (error: any) {
+        logger.error("Failed to add lead to SMS queue", {
+          requestId,
+          lead_id: callState.lead_id,
+          error: error.message,
+        });
+        // Don't fail the webhook if SMS queue fails
+      }
+    }
 
     // Auto-block for today: Check if this is a "Call failed" error and block for today only
     // These are bad numbers from purchased data that don't even register as missed calls
@@ -525,14 +557,45 @@ async function processInboundCall(
         leadInfo.state || "",
         transcript.outcome,
         callId,
-        scheduledCallbackTime
+        scheduledCallbackTime,
+        true // isInbound - don't count against daily/monthly limits
       );
 
-      logger.info("Inbound call added to redial queue", {
+      logger.info("Inbound call added to redial queue (not counted against daily/monthly limits)", {
         requestId,
         lead_id: leadInfo.lead_id,
         outcome: transcript.outcome,
       });
+
+      // Add lead to SMS queue for VOICEMAIL or NO_ANSWER outcomes (if enabled)
+      if (config.sms.enabled && config.sms.triggers.includes(transcript.outcome)) {
+        try {
+          // Add to SMS queue - scheduler will check Bland conversation history before sending
+          smsSchedulerService.addLead({
+            lead_id: leadInfo.lead_id,
+            phone_number: phoneNumber,
+            list_id: leadInfo.list_id,
+            first_name: leadInfo.first_name || "",
+            last_name: leadInfo.last_name || "",
+            state: leadInfo.state || "",
+            last_outcome: transcript.outcome,
+            last_call_timestamp: Date.now(),
+          });
+
+          logger.info("Lead added to SMS queue (inbound)", {
+            requestId,
+            lead_id: leadInfo.lead_id,
+            phone: phoneNumber,
+            outcome: transcript.outcome,
+          });
+        } catch (error: any) {
+          logger.error("Failed to add lead to SMS queue (inbound)", {
+            requestId,
+            lead_id: leadInfo.lead_id,
+            error: error.message,
+          });
+        }
+      }
     }
 
     // Step 9: Handle failed call auto-block (same as outbound)

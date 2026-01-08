@@ -39,6 +39,9 @@ class WebhookLoggerService {
   private currentDate: string;
   private logs: Map<string, WebhookLogEntry>;
   private enabled: boolean;
+  private maxLogsInMemory: number = 10000; // Limit memory usage
+  private lastSaveTime: number = 0;
+  private saveIntervalMs: number = 60000; // Save every 60 seconds instead of every request
 
   constructor() {
     this.dataDir = path.join(__dirname, "../../data/webhook-logs");
@@ -51,7 +54,15 @@ class WebhookLoggerService {
     }
 
     this.loadTodayLogs();
-    logger.info("Webhook logger initialized", { enabled: this.enabled });
+    logger.info("Webhook logger initialized", {
+      enabled: this.enabled,
+      maxLogsInMemory: this.maxLogsInMemory,
+    });
+
+    // Periodic save to reduce write frequency
+    if (this.enabled) {
+      setInterval(() => this.flushToDisk(), this.saveIntervalMs);
+    }
   }
 
   /**
@@ -66,6 +77,7 @@ class WebhookLoggerService {
 
   /**
    * Load today's logs from disk
+   * Only load if under memory limit to prevent memory bloat
    */
   private loadTodayLogs(): void {
     if (!this.enabled) return;
@@ -75,11 +87,28 @@ class WebhookLoggerService {
       if (fs.existsSync(filePath)) {
         const data = fs.readFileSync(filePath, "utf-8");
         const parsed = JSON.parse(data);
-        this.logs = new Map(Object.entries<WebhookLogEntry>(parsed));
-        logger.info("Loaded webhook logs for today", {
-          date: this.currentDate,
-          count: this.logs.size,
-        });
+        const entries = Object.entries<WebhookLogEntry>(parsed);
+
+        // Only load recent entries to limit memory usage
+        if (entries.length > this.maxLogsInMemory) {
+          // Keep only the most recent entries
+          const recentEntries = entries
+            .sort((a, b) => b[1].timestamp - a[1].timestamp)
+            .slice(0, this.maxLogsInMemory);
+          this.logs = new Map(recentEntries);
+          logger.warn("Loaded only recent webhook logs (memory limit)", {
+            date: this.currentDate,
+            total_on_disk: entries.length,
+            loaded_in_memory: this.logs.size,
+            max_limit: this.maxLogsInMemory,
+          });
+        } else {
+          this.logs = new Map(entries);
+          logger.info("Loaded webhook logs for today", {
+            date: this.currentDate,
+            count: this.logs.size,
+          });
+        }
       }
     } catch (error: any) {
       logger.error("Failed to load webhook logs", {
@@ -90,21 +119,41 @@ class WebhookLoggerService {
   }
 
   /**
-   * Save logs to disk
+   * Save logs to disk (batched, called periodically)
    */
-  private async saveLogs(): Promise<void> {
-    if (!this.enabled) return;
+  private flushToDisk(): void {
+    if (!this.enabled || this.logs.size === 0) return;
 
     try {
       const filePath = this.getFilePath(this.currentDate);
-      const data = JSON.stringify(Object.fromEntries(this.logs), null, 2);
-      fs.writeFileSync(filePath, data, "utf-8");
+
+      // Read existing data from disk to merge with memory
+      let existingData: Record<string, WebhookLogEntry> = {};
+      if (fs.existsSync(filePath)) {
+        const data = fs.readFileSync(filePath, "utf-8");
+        existingData = JSON.parse(data);
+      }
+
+      // Merge memory logs with disk logs
+      const mergedData = { ...existingData, ...Object.fromEntries(this.logs) };
+
+      // Write merged data
+      fs.writeFileSync(filePath, JSON.stringify(mergedData, null, 2), "utf-8");
+      this.lastSaveTime = Date.now();
     } catch (error: any) {
-      logger.error("Failed to save webhook logs", {
+      logger.error("Failed to flush webhook logs to disk", {
         error: error.message,
         date: this.currentDate,
       });
     }
+  }
+
+  /**
+   * Immediate save (for critical updates only)
+   */
+  private async saveLogs(): Promise<void> {
+    // Just set a flag that data needs saving, actual save happens in flushToDisk
+    // This reduces disk I/O dramatically
   }
 
   /**
@@ -132,9 +181,30 @@ class WebhookLoggerService {
 
     // Check if date changed (new day)
     if (today !== this.currentDate) {
+      this.flushToDisk(); // Save before clearing
       this.currentDate = today;
       this.logs.clear();
       this.loadTodayLogs();
+    }
+
+    // Enforce memory limit - remove oldest entries if needed
+    if (this.logs.size >= this.maxLogsInMemory) {
+      // Remove 10% oldest entries to make room
+      const entriesToRemove = Math.floor(this.maxLogsInMemory * 0.1);
+      const sortedEntries = Array.from(this.logs.entries())
+        .sort((a, b) => a[1].timestamp - b[1].timestamp);
+
+      for (let i = 0; i < entriesToRemove && i < sortedEntries.length; i++) {
+        const entry = sortedEntries[i];
+        if (entry) {
+          this.logs.delete(entry[0]);
+        }
+      }
+
+      logger.debug("Removed old webhook logs to stay under memory limit", {
+        removed: entriesToRemove,
+        remaining: this.logs.size,
+      });
     }
 
     const entry: WebhookLogEntry = {
@@ -151,7 +221,7 @@ class WebhookLoggerService {
     };
 
     this.logs.set(requestId, entry);
-    await this.saveLogs();
+    // Don't save immediately - batched saves happen every 60 seconds
   }
 
   /**
@@ -167,7 +237,7 @@ class WebhookLoggerService {
     if (entry) {
       entry.validation_result = "failed";
       entry.validation_error = error;
-      await this.saveLogs();
+      // Batched saves every 60 seconds
     }
   }
 
@@ -187,7 +257,7 @@ class WebhookLoggerService {
       if (reason) {
         entry.blocklist_reason = reason;
       }
-      await this.saveLogs();
+      // Batched saves every 60 seconds
     }
   }
 
@@ -207,7 +277,7 @@ class WebhookLoggerService {
       if (error) {
         entry.processing_error = error;
       }
-      await this.saveLogs();
+      // Batched saves every 60 seconds
     }
   }
 

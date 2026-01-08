@@ -179,3 +179,15 @@ export function getMillisecondsUntilNextValidTime(
 
   return nextValidTime.getTime() - now.getTime();
 }
+
+/**
+ * Export as object for convenience
+ */
+export const timezoneHelper = {
+  getTimezoneByState,
+  getCurrentTimeInTimezone,
+  getCurrentHourInTimezone,
+  getCurrentDayOfWeekInTimezone,
+  isWeekendInTimezone,
+  getMillisecondsUntilNextValidTime,
+};

@@ -258,15 +258,61 @@ class RedialQueueService {
    * Get redial interval based on attempt number
    * Uses REDIAL_PROGRESSIVE_INTERVALS from env file consistently across all days
    * Example: [0, 2, 5, 10, 30, 60, 120] minutes
+   *
+   * Now with randomization support for better distribution throughout the day
    */
   private getProgressiveInterval(attemptNumber: number): number {
     // Use progressive intervals from config for all attempts, regardless of day
     const intervals = this.queueConfig.progressive_intervals;
     const index = attemptNumber - 1;
 
-    if (index < 0) return intervals[0] || 0;
-    if (index >= intervals.length) return intervals[intervals.length - 1] || 120;
-    return intervals[index] || 30;
+    let baseInterval = 0;
+    if (index < 0) baseInterval = intervals[0] || 0;
+    else if (index >= intervals.length) baseInterval = intervals[intervals.length - 1] || 120;
+    else baseInterval = intervals[index] || 30;
+
+    // Apply randomization if enabled
+    if (config.redialDecay.enabled && config.redialDecay.randomizeTimes) {
+      return this.randomizeInterval(baseInterval);
+    }
+
+    return baseInterval;
+  }
+
+  /**
+   * Randomize interval to distribute calls throughout the day
+   * Adds random minutes between minRandomMinutes and maxRandomMinutes
+   */
+  private randomizeInterval(baseInterval: number): number {
+    const min = config.redialDecay.minRandomMinutes;
+    const max = config.redialDecay.maxRandomMinutes;
+
+    // Add random minutes to base interval
+    const randomAddition = Math.floor(Math.random() * (max - min + 1)) + min;
+    return baseInterval + randomAddition;
+  }
+
+  /**
+   * Get maximum daily attempts for a lead based on how many days since creation
+   * Uses decay schedule if enabled, otherwise uses static max_daily_attempts
+   */
+  private getDailyMaxAttempts(createdAtTimestamp: number): number {
+    if (!config.redialDecay.enabled) {
+      return this.queueConfig.max_daily_attempts;
+    }
+
+    const daysSinceCreation = this.getLeadDaysSinceCreation(createdAtTimestamp);
+    const schedule = config.redialDecay.dailySchedule;
+
+    // If we have a schedule entry for this day, use it
+    if (daysSinceCreation < schedule.length) {
+      const dailyMax = schedule[daysSinceCreation];
+      return dailyMax !== undefined ? dailyMax : 1;
+    }
+
+    // If beyond schedule, use last entry or 1 as minimum
+    const lastEntry = schedule[schedule.length - 1];
+    return lastEntry !== undefined ? lastEntry : 1;
   }
 
   private ensureDirectories(): void {
@@ -608,6 +654,8 @@ class RedialQueueService {
   /**
    * Add or update a lead in redial queue
    * Called from webhook after call completes
+   *
+   * @param isInbound - If true, doesn't count against daily limit (customer called us)
    */
   async addOrUpdateLead(
     leadId: string,
@@ -618,7 +666,8 @@ class RedialQueueService {
     state: string,
     outcome: string,
     callId: string,
-    scheduledCallbackTime?: number
+    scheduledCallbackTime?: number,
+    isInbound?: boolean
   ): Promise<void> {
     if (!this.queueConfig.enabled) {
       return;
@@ -695,18 +744,29 @@ class RedialQueueService {
       existing.last_name = lastName;
       existing.state = state; // Use most recent state
 
-      // Update lifetime attempts counter
-      existing.attempts += 1;
+      // Update attempt counters (ONLY for outbound calls, not inbound)
+      if (!isInbound) {
+        // Update lifetime attempts counter
+        existing.attempts += 1;
 
-      // Update daily attempts counter
-      const today = this.getCurrentDateEST();
-      if (existing.last_attempt_date === today) {
-        // Same day - increment today's counter
-        existing.attempts_today += 1;
+        // Update daily attempts counter
+        const today = this.getCurrentDateEST();
+        if (existing.last_attempt_date === today) {
+          // Same day - increment today's counter
+          existing.attempts_today += 1;
+        } else {
+          // New day - reset today's counter
+          existing.attempts_today = 1;
+          existing.last_attempt_date = today;
+        }
       } else {
-        // New day - reset today's counter
-        existing.attempts_today = 1;
-        existing.last_attempt_date = today;
+        logger.info("Inbound call - not counting against daily limit", {
+          lead_id: leadId,
+          phone: phoneNumber,
+          outcome,
+          current_attempts_today: existing.attempts_today,
+          current_attempts_lifetime: existing.attempts,
+        });
       }
 
       existing.last_call_timestamp = now;
@@ -732,8 +792,11 @@ class RedialQueueService {
         existing.status = "pending";
       }
 
-      // Check if daily max attempts reached
-      if (existing.attempts_today >= this.queueConfig.max_daily_attempts) {
+      // Check daily max attempts (with decay schedule if enabled)
+      const maxDailyAttempts = this.getDailyMaxAttempts(existing.created_at);
+      const monthlyMax = config.redialDecay.enabled ? config.redialDecay.maxCallsPerMonth : Infinity;
+
+      if (existing.attempts_today >= maxDailyAttempts) {
         existing.status = "daily_max_reached";
         existing.daily_max_reached_at = now;
         logger.info("Lead reached daily max attempts - will retry tomorrow", {
@@ -741,7 +804,19 @@ class RedialQueueService {
           phone: phoneNumber,
           attempts_today: existing.attempts_today,
           total_lifetime: existing.attempts,
-          max_daily: this.queueConfig.max_daily_attempts,
+          max_daily: maxDailyAttempts,
+          day_number: this.getLeadDaysSinceCreation(existing.created_at) + 1,
+        });
+      }
+
+      // Check monthly max attempts (if decay enabled)
+      if (config.redialDecay.enabled && existing.attempts >= monthlyMax) {
+        existing.status = "completed";
+        logger.info("Lead reached monthly max attempts - marking as completed", {
+          lead_id: leadId,
+          phone: phoneNumber,
+          total_attempts: existing.attempts,
+          monthly_max: monthlyMax,
         });
       }
 
@@ -773,8 +848,9 @@ class RedialQueueService {
         first_name: firstName,
         last_name: lastName,
         state: state,
-        attempts: 1, // Lifetime counter
-        attempts_today: 1, // Daily counter (first call today)
+        // Only count as attempt if it's outbound (we initiated the call)
+        attempts: isInbound ? 0 : 1, // Lifetime counter
+        attempts_today: isInbound ? 0 : 1, // Daily counter
         last_attempt_date: today, // Track which day this was
         last_call_timestamp: now,
         next_redial_timestamp: scheduledCallbackTime || (now + actualIntervalMs),
@@ -789,10 +865,12 @@ class RedialQueueService {
 
       this.records.set(key, newRecord);
 
-      logger.info("Added new lead to redial queue", {
+      logger.info(isInbound ? "Added new lead to redial queue (inbound - no attempt count)" : "Added new lead to redial queue", {
         lead_id: leadId,
         phone: phoneNumber,
         outcome,
+        is_inbound: isInbound || false,
+        attempts_counted: isInbound ? 0 : 1,
         next_redial: new Date(newRecord.next_redial_timestamp).toISOString(),
         next_interval_minutes: firstIntervalMinutes,
       });
@@ -951,15 +1029,27 @@ class RedialQueueService {
         daily_max_reached: favorableRecords.filter(r => r.status === "daily_max_reached").length,
       });
 
-      // Filter #3: Only records under daily max attempts (no lifetime max - call until success!)
+      // Filter #3: Only records under daily max attempts (with decay schedule support)
       const underDailyMax = favorableRecords.filter((record) => {
         if (!record || typeof record.attempts_today !== "number") return false;
-        return record.attempts_today < this.queueConfig.max_daily_attempts;
+
+        // Use dynamic max based on days since creation
+        const dailyMax = this.getDailyMaxAttempts(record.created_at);
+        if (record.attempts_today >= dailyMax) return false;
+
+        // Check monthly max if decay enabled
+        if (config.redialDecay.enabled) {
+          const monthlyMax = config.redialDecay.maxCallsPerMonth;
+          if (record.attempts >= monthlyMax) return false;
+        }
+
+        return true;
       });
 
-      logger.debug("Filtered to under daily max attempts", {
+      logger.debug("Filtered to under daily/monthly max attempts", {
         under_daily_max: underDailyMax.length,
-        max_daily_attempts: this.queueConfig.max_daily_attempts,
+        decay_enabled: config.redialDecay.enabled,
+        monthly_max: config.redialDecay.enabled ? config.redialDecay.maxCallsPerMonth : "disabled",
       });
 
       // Filter #4: Only records that are due for redial (timestamp passed)
@@ -1018,17 +1108,33 @@ class RedialQueueService {
             continue;
           }
 
-          // PRE-CALL SAFETY CHECK #1: Verify record still under daily max attempts
-          if (lead.attempts_today >= this.queueConfig.max_daily_attempts) {
+          // PRE-CALL SAFETY CHECK #1: Verify record still under daily max attempts (with decay)
+          const leadDailyMax = this.getDailyMaxAttempts(lead.created_at);
+          if (lead.attempts_today >= leadDailyMax) {
             logger.warn("Lead reached daily max attempts since filtering, skipping until tomorrow", {
               lead_id: lead.lead_id,
               phone: lead.phone_number,
               attempts_today: lead.attempts_today,
               attempts_lifetime: lead.attempts,
-              max_daily: this.queueConfig.max_daily_attempts,
+              max_daily: leadDailyMax,
+              day_number: this.getLeadDaysSinceCreation(lead.created_at) + 1,
             });
             lead.status = "daily_max_reached";
             lead.daily_max_reached_at = now;
+            await this.saveRecords();
+            skippedCount++;
+            continue;
+          }
+
+          // PRE-CALL SAFETY CHECK #1b: Verify record still under monthly max (if decay enabled)
+          if (config.redialDecay.enabled && lead.attempts >= config.redialDecay.maxCallsPerMonth) {
+            logger.warn("Lead reached monthly max attempts, marking as completed", {
+              lead_id: lead.lead_id,
+              phone: lead.phone_number,
+              total_attempts: lead.attempts,
+              monthly_max: config.redialDecay.maxCallsPerMonth,
+            });
+            lead.status = "completed";
             await this.saveRecords();
             skippedCount++;
             continue;
@@ -1246,10 +1352,19 @@ class RedialQueueService {
       daily_max_reached: records.filter((r) => r.status === "daily_max_reached").length,
       paused: records.filter((r) => r.status === "paused").length,
       ready_to_dial: records.filter(
-        (r) =>
-          (r.status === "pending" || r.status === "rescheduled") &&
-          r.next_redial_timestamp <= now &&
-          r.attempts_today < this.queueConfig.max_daily_attempts
+        (r) => {
+          if ((r.status !== "pending" && r.status !== "rescheduled") || r.next_redial_timestamp > now) {
+            return false;
+          }
+          // Use dynamic daily max
+          const dailyMax = this.getDailyMaxAttempts(r.created_at);
+          if (r.attempts_today >= dailyMax) return false;
+          // Check monthly max if decay enabled
+          if (config.redialDecay.enabled && r.attempts >= config.redialDecay.maxCallsPerMonth) {
+            return false;
+          }
+          return true;
+        }
       ).length,
       current_month: this.currentMonth,
     };
@@ -1273,12 +1388,19 @@ class RedialQueueService {
     }
 
     if (filter?.ready) {
-      records = records.filter(
-        (r) =>
-          (r.status === "pending" || r.status === "rescheduled") &&
-          r.next_redial_timestamp <= now &&
-          r.attempts_today < this.queueConfig.max_daily_attempts
-      );
+      records = records.filter((r) => {
+        if ((r.status !== "pending" && r.status !== "rescheduled") || r.next_redial_timestamp > now) {
+          return false;
+        }
+        // Use dynamic daily max
+        const dailyMax = this.getDailyMaxAttempts(r.created_at);
+        if (r.attempts_today >= dailyMax) return false;
+        // Check monthly max if decay enabled
+        if (config.redialDecay.enabled && r.attempts >= config.redialDecay.maxCallsPerMonth) {
+          return false;
+        }
+        return true;
+      });
     }
 
     // Sort by next_redial_timestamp (earliest first)
