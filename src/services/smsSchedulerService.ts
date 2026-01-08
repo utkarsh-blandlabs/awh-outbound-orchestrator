@@ -174,11 +174,17 @@ class SMSSchedulerService {
 
   /**
    * Remove lead from SMS queue
+   * PUBLIC: Can be called from webhook handlers
    */
-  private removeLead(phoneNumber: string): void {
+  removeLead(phoneNumber: string): void {
     const leads = this.loadPendingLeads();
     const filtered = leads.filter(l => l.phone_number !== phoneNumber);
     this.savePendingLeads(filtered);
+
+    logger.info("Lead removed from SMS queue", {
+      phone: phoneNumber,
+      remaining: filtered.length,
+    });
   }
 
   /**

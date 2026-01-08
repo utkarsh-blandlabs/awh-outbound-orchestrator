@@ -9,6 +9,7 @@ import { logger } from "../utils/logger";
 import { config } from "../config";
 import { schedulerService } from "./schedulerService";
 import { convosoService } from "./convosoService";
+import { dailyCallTracker } from "./dailyCallTrackerService";
 
 interface RedialRecord {
   lead_id: string;
@@ -1030,17 +1031,42 @@ class RedialQueueService {
       });
 
       // Filter #3: Only records under daily max attempts (with decay schedule support)
+      // CRITICAL FIX: Use dailyCallTracker's actual count (includes ALL calls: Convoso, redial, inbound, API)
       const underDailyMax = favorableRecords.filter((record) => {
-        if (!record || typeof record.attempts_today !== "number") return false;
+        if (!record) return false;
+
+        // Get ACTUAL call history from dailyCallTracker (source of truth)
+        const callHistory = dailyCallTracker.getCallHistory(record.phone_number);
+
+        // Count actual calls made today (from dailyCallTracker)
+        const actualCallsToday = callHistory ? callHistory.calls.length : 0;
 
         // Use dynamic max based on days since creation
         const dailyMax = this.getDailyMaxAttempts(record.created_at);
-        if (record.attempts_today >= dailyMax) return false;
+
+        if (actualCallsToday >= dailyMax) {
+          logger.debug("Filtered out - daily max reached (actual calls)", {
+            phone: record.phone_number,
+            lead_id: record.lead_id,
+            actual_calls_today: actualCallsToday,
+            daily_max: dailyMax,
+            day_since_creation: this.getLeadDaysSinceCreation(record.created_at) + 1,
+          });
+          return false;
+        }
 
         // Check monthly max if decay enabled
         if (config.redialDecay.enabled) {
           const monthlyMax = config.redialDecay.maxCallsPerMonth;
-          if (record.attempts >= monthlyMax) return false;
+          if (record.attempts >= monthlyMax) {
+            logger.debug("Filtered out - monthly max reached", {
+              phone: record.phone_number,
+              lead_id: record.lead_id,
+              total_attempts: record.attempts,
+              monthly_max: monthlyMax,
+            });
+            return false;
+          }
         }
 
         return true;
@@ -1109,15 +1135,21 @@ class RedialQueueService {
           }
 
           // PRE-CALL SAFETY CHECK #1: Verify record still under daily max attempts (with decay)
+          // CRITICAL FIX: Use dailyCallTracker's actual count (includes ALL calls)
+          const callHistory = dailyCallTracker.getCallHistory(lead.phone_number);
+          const actualCallsToday = callHistory ? callHistory.calls.length : 0;
           const leadDailyMax = this.getDailyMaxAttempts(lead.created_at);
-          if (lead.attempts_today >= leadDailyMax) {
-            logger.warn("Lead reached daily max attempts since filtering, skipping until tomorrow", {
+
+          if (actualCallsToday >= leadDailyMax) {
+            logger.warn("SAFETY: Lead reached daily max attempts (actual calls), skipping until tomorrow", {
               lead_id: lead.lead_id,
               phone: lead.phone_number,
-              attempts_today: lead.attempts_today,
+              actual_calls_today: actualCallsToday,
+              redial_attempts_today: lead.attempts_today,
               attempts_lifetime: lead.attempts,
               max_daily: leadDailyMax,
               day_number: this.getLeadDaysSinceCreation(lead.created_at) + 1,
+              reason: "Includes Convoso calls, redials, API calls, and inbound calls",
             });
             lead.status = "daily_max_reached";
             lead.daily_max_reached_at = now;
@@ -1147,7 +1179,7 @@ class RedialQueueService {
           );
 
           if (activeCallToNumber) {
-            logger.info("SAFETY: Skipping redial - active/pending call detected", {
+            logger.info("SAFETY: Skipping redial - active/pending call detected in CallStateManager", {
               lead_id: lead.lead_id,
               phone: lead.phone_number,
               active_call_id: activeCallToNumber.call_id,
@@ -1156,6 +1188,26 @@ class RedialQueueService {
 
             // Push redial ahead by 5 minutes to avoid conflict
             const pushAheadMinutes = 5;
+            lead.next_redial_timestamp = now + pushAheadMinutes * 60 * 1000;
+            lead.updated_at = now;
+            await this.saveRecords();
+            skippedCount++;
+            continue; // Skip to next lead
+          }
+
+          // PRE-CALL SAFETY CHECK #2b: CRITICAL - Check dailyCallTracker for active calls
+          // This prevents calling while customer is on the phone with agent (even after transfer)
+          const hasActiveCall = dailyCallTracker.hasActiveCall(lead.phone_number);
+          if (hasActiveCall) {
+            logger.warn("SAFETY: Skipping redial - active call detected in dailyCallTracker", {
+              lead_id: lead.lead_id,
+              phone: lead.phone_number,
+              reason: "Customer is currently on a call (possibly transferred to agent)",
+              next_attempt: lead.attempts + 1,
+            });
+
+            // Push redial ahead by 10 minutes to avoid interrupting agent call
+            const pushAheadMinutes = 10;
             lead.next_redial_timestamp = now + pushAheadMinutes * 60 * 1000;
             lead.updated_at = now;
             await this.saveRecords();
@@ -1493,6 +1545,36 @@ class RedialQueueService {
     }
 
     return false;
+  }
+
+  /**
+   * Mark lead as completed by phone number (for DNC requests)
+   * Used when we don't have lead_id (e.g., SMS webhook)
+   */
+  async markLeadAsCompleted(phoneNumber: string, reason: string): Promise<boolean> {
+    let updated = false;
+
+    // Find all records with this phone number
+    for (const [key, record] of this.records.entries()) {
+      if (record.phone_number === phoneNumber) {
+        record.status = "completed";
+        record.updated_at = this.getNowEST();
+        record.last_outcome = reason;
+        updated = true;
+
+        logger.info("Marked lead as completed in redial queue", {
+          lead_id: record.lead_id,
+          phone: phoneNumber,
+          reason,
+        });
+      }
+    }
+
+    if (updated) {
+      await this.saveRecords();
+    }
+
+    return updated;
   }
 
   /**

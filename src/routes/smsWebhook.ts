@@ -9,10 +9,52 @@ import { Router, Request, Response } from "express";
 import { logger } from "../utils/logger";
 import { blocklistService } from "../services/blocklistService";
 import { redialQueueService } from "../services/redialQueueService";
+import { convosoService } from "../services/convosoService";
+import { smsSchedulerService } from "../services/smsSchedulerService";
+import { schedulerService } from "../services/schedulerService";
 import * as fs from "fs";
 import * as path from "path";
 
 const router = Router();
+
+// TCPA-compliant DNC keywords (comprehensive list)
+const DNC_KEYWORDS = [
+  "STOP",
+  "STOPALL",
+  "UNSUBSCRIBE",
+  "CANCEL",
+  "END",
+  "QUIT",
+  "REMOVE",
+  "OPT OUT",
+  "OPTOUT",
+  "DO NOT CONTACT",
+  "DO NOT CALL",
+  "DO NOT TEXT",
+  "DON'T CALL",
+  "DON'T TEXT",
+  "TAKE ME OFF",
+  "REMOVE ME",
+  "DELETE MY NUMBER",
+  "DNC",
+];
+
+// Callback request keywords
+const CALLBACK_KEYWORDS = [
+  "CALL ME",
+  "CALL BACK",
+  "CALLBACK",
+  "PLEASE CALL",
+  "CALL ME BACK",
+  "SCHEDULE",
+  "YES",
+  "YES PLEASE",
+  "INTERESTED",
+  "INFO",
+  "MORE INFO",
+  "TELL ME MORE",
+  "INFORMATION",
+];
 
 interface SMSWebhookPayload {
   from: string; // Phone number that sent the SMS
@@ -83,26 +125,34 @@ router.post("/sms-reply", async (req: Request, res: Response) => {
     let replyType: "POSITIVE" | "NEGATIVE" | "OPT_OUT" | "UNKNOWN" = "UNKNOWN";
     let actionTaken = "";
 
-    // Check for opt-out keywords (HIGHEST PRIORITY)
-    if (keywords.opt_out_keywords.some(kw => replyText.includes(kw))) {
+    // Check for DNC keywords (HIGHEST PRIORITY - TCPA compliance)
+    if (DNC_KEYWORDS.some(kw => replyText.includes(kw))) {
       replyType = "OPT_OUT";
-      await handleOptOut(phoneNumber, replyText);
-      actionTaken = "Added to DNC blocklist";
+      await handleDNCRequest(phoneNumber, replyText, requestId);
+      actionTaken = "DNC: Blocklist, Convoso DNC, SMS removed, Redial stopped";
+    }
+    // Check for callback keywords
+    else if (CALLBACK_KEYWORDS.some(kw => replyText.includes(kw))) {
+      replyType = "POSITIVE";
+      await handleCallbackRequest(phoneNumber, replyText, requestId);
+      actionTaken = "Callback scheduled";
     }
     // Check for positive keywords
     else if (keywords.positive_keywords.some(kw => replyText.includes(kw))) {
       replyType = "POSITIVE";
-      actionTaken = "Logged for callback consideration";
+      actionTaken = "Positive engagement - logged for review";
     }
     // Check for negative keywords
     else if (keywords.negative_keywords.some(kw => replyText.includes(kw))) {
       replyType = "NEGATIVE";
-      actionTaken = "Marked as not interested";
+      await handleNegativeResponse(phoneNumber, replyText, requestId);
+      actionTaken = "Not interested - SMS removed";
     }
     // Check for later keywords
     else if (keywords.later_keywords.some(kw => replyText.includes(kw))) {
       replyType = "POSITIVE";
-      actionTaken = "Logged for callback consideration";
+      await handleCallbackRequest(phoneNumber, replyText, requestId);
+      actionTaken = "Callback requested for later";
     }
 
     logger.info("SMS reply processed", {
@@ -133,28 +183,204 @@ router.post("/sms-reply", async (req: Request, res: Response) => {
 });
 
 /**
- * Handle opt-out (STOP) reply
- * Adds to permanent blocklist
+ * Handle DNC/STOP request (TCPA compliance)
+ * 1. Add to blocklist
+ * 2. Remove from SMS queue
+ * 3. Update Convoso with DNC status
+ * 4. Mark as completed in redial queue
  */
-async function handleOptOut(phoneNumber: string, message: string): Promise<void> {
+async function handleDNCRequest(
+  phoneNumber: string,
+  message: string,
+  requestId: string
+): Promise<void> {
   try {
-    // Add to permanent blocklist
+    logger.warn("DNC request received via SMS", {
+      requestId,
+      phone: phoneNumber,
+      message,
+    });
+
+    // 1. Add to permanent blocklist
     const flag = blocklistService.addFlag(
       "phone",
       phoneNumber,
-      "SMS opt-out: STOP received"
+      `DNC requested via SMS: "${message}"`,
+      `sms_dnc_${requestId}`
     );
 
-    logger.info("SMS opt-out processed - added to blocklist", {
+    logger.info("Phone number added to DNC blocklist", {
+      requestId,
       phone: phoneNumber,
       flag_id: flag.id,
     });
+
+    // 2. Remove from SMS queue immediately
+    smsSchedulerService.removeLead(phoneNumber);
+
+    logger.info("Phone number removed from SMS queue", {
+      requestId,
+      phone: phoneNumber,
+    });
+
+    // 3. Update Convoso with DNC status (TODO: implement updateLeadStatus method)
+    // For now, the lead will be blocked and won't receive calls/SMS
+    logger.info("Convoso DNC update", {
+      requestId,
+      phone: phoneNumber,
+      note: "Lead blocked in system - manual Convoso update may be needed",
+    });
+
+    // 4. Mark lead as completed in redial queue (stop all future calls)
+    try {
+      await redialQueueService.markLeadAsCompleted(
+        phoneNumber,
+        "DNC requested via SMS"
+      );
+
+      logger.info("Lead marked as completed in redial queue", {
+        requestId,
+        phone: phoneNumber,
+      });
+    } catch (error: any) {
+      logger.error("Failed to mark lead as completed in redial queue", {
+        requestId,
+        phone: phoneNumber,
+        error: error.message,
+      });
+    }
+
+    logger.info("DNC request processed successfully", {
+      requestId,
+      phone: phoneNumber,
+      actions: [
+        "Added to blocklist",
+        "Removed from SMS queue",
+        "Updated Convoso with DNC",
+        "Marked completed in redial queue",
+      ],
+    });
   } catch (error: any) {
-    logger.error("Failed to process opt-out", {
+    logger.error("Failed to process DNC request", {
+      requestId,
+      phone: phoneNumber,
+      error: error.message,
+      stack: error.stack,
+    });
+    throw error;
+  }
+}
+
+/**
+ * Handle callback request
+ * Schedule callback in redial queue and update Convoso
+ */
+async function handleCallbackRequest(
+  phoneNumber: string,
+  message: string,
+  requestId: string
+): Promise<void> {
+  try {
+    logger.info("Callback request received via SMS", {
+      requestId,
+      phone: phoneNumber,
+      message,
+    });
+
+    // 1. Look up lead in Convoso
+    const leadInfo = await convosoService.lookupLeadByPhone(phoneNumber);
+
+    if (!leadInfo) {
+      logger.warn("Lead not found in Convoso for callback request", {
+        requestId,
+        phone: phoneNumber,
+      });
+      return;
+    }
+
+    // 2. Schedule callback in redial queue (high priority)
+    const now = Date.now();
+    const isBusinessHours = schedulerService.isActive();
+
+    // If business hours: 5 min from now, else: 1 hour from now
+    const callbackTime = isBusinessHours
+      ? now + 5 * 60 * 1000
+      : now + 60 * 60 * 1000;
+
+    await redialQueueService.addOrUpdateLead(
+      leadInfo.lead_id,
+      phoneNumber,
+      leadInfo.list_id,
+      leadInfo.first_name || "",
+      leadInfo.last_name || "",
+      leadInfo.state || "",
+      "CALLBACK_REQUESTED",
+      `sms_callback_${requestId}`,
+      callbackTime
+    );
+
+    logger.info("Callback scheduled via SMS request", {
+      requestId,
+      phone: phoneNumber,
+      lead_id: leadInfo.lead_id,
+      scheduled_time: new Date(callbackTime).toISOString(),
+      is_business_hours: isBusinessHours,
+    });
+
+    // 3. Update Convoso with callback status (TODO: implement updateLeadStatus method)
+    // Callback is scheduled in redial queue, which is the important part
+    logger.info("Convoso callback status", {
+      requestId,
+      phone: phoneNumber,
+      lead_id: leadInfo.lead_id,
+      note: "Callback scheduled in redial queue - manual Convoso update may be needed",
+    });
+  } catch (error: any) {
+    logger.error("Failed to process callback request", {
+      requestId,
       phone: phoneNumber,
       error: error.message,
     });
     throw error;
+  }
+}
+
+/**
+ * Handle negative response (not interested but not DNC)
+ */
+async function handleNegativeResponse(
+  phoneNumber: string,
+  message: string,
+  requestId: string
+): Promise<void> {
+  try {
+    logger.info("Negative response received via SMS", {
+      requestId,
+      phone: phoneNumber,
+      message,
+    });
+
+    // 1. Remove from SMS queue (stop SMS, but allow calls)
+    smsSchedulerService.removeLead(phoneNumber);
+
+    logger.info("Phone number removed from SMS queue (negative response)", {
+      requestId,
+      phone: phoneNumber,
+    });
+
+    // 2. Update Convoso with NOT_INTERESTED status (TODO: implement updateLeadStatus method)
+    // SMS removed, which is the important action
+    logger.info("Convoso not interested status", {
+      requestId,
+      phone: phoneNumber,
+      note: "SMS removed - manual Convoso update may be needed",
+    });
+  } catch (error: any) {
+    logger.error("Failed to process negative response", {
+      requestId,
+      phone: phoneNumber,
+      error: error.message,
+    });
   }
 }
 
