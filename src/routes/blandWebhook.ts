@@ -557,10 +557,11 @@ async function processInboundCall(
         leadInfo.state || "",
         transcript.outcome,
         callId,
-        scheduledCallbackTime
+        scheduledCallbackTime,
+        true // isInbound - don't count against daily/monthly limits
       );
 
-      logger.info("Inbound call added to redial queue", {
+      logger.info("Inbound call added to redial queue (not counted against daily/monthly limits)", {
         requestId,
         lead_id: leadInfo.lead_id,
         outcome: transcript.outcome,

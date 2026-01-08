@@ -24,6 +24,7 @@ interface DailyCallRecord {
   lead_ids: string[]; // All lead IDs for this number today
   calls: CallAttempt[]; // All call attempts today
   active_call_id: string | null; // Currently active call (if any)
+  active_call_release_time?: number; // Timestamp when active call should be released (for transfers)
   final_outcome: CallOutcome | null;
   last_call_timestamp: number;
   blocked: boolean; // Manual block flag
@@ -476,29 +477,22 @@ class DailyCallTrackerService {
     // Keep the line "busy" for a safety window to prevent duplicate calls
     if (record.active_call_id === callId) {
       if (outcome === CallOutcome.TRANSFERRED) {
-        // Set a delayed clear for transferred calls (30 minutes)
+        // Set release time for transferred calls (30 minutes from now)
         // This prevents duplicate calls while customer is talking to agent
+        // Cleanup interval will clear it after the time expires
         const transferSafetyWindowMs = 30 * 60 * 1000; // 30 minutes
+        record.active_call_release_time = Date.now() + transferSafetyWindowMs;
+
         logger.info("Transfer detected - keeping line protected", {
           phone: record.phone_number,
           call_id: callId,
           safety_window_minutes: 30,
+          release_at: new Date(record.active_call_release_time).toISOString(),
         });
-
-        setTimeout(() => {
-          // Re-check if this is still the active call before clearing
-          if (record.active_call_id === callId) {
-            record.active_call_id = null;
-            this.saveRecords();
-            logger.info("Transfer safety window expired - line released", {
-              phone: record.phone_number,
-              call_id: callId,
-            });
-          }
-        }, transferSafetyWindowMs);
       } else {
         // For non-transferred calls, clear immediately
         record.active_call_id = null;
+        record.active_call_release_time = undefined;
       }
     }
 
@@ -686,7 +680,43 @@ class DailyCallTrackerService {
   getConfig(): ProtectionConfig {
     return { ...this.config };
   }
+
+  /**
+   * Cleanup expired transfer safety windows
+   * Called periodically to release phone lines after transfer safety period expires
+   */
+  cleanupExpiredTransfers(): void {
+    const now = Date.now();
+    let releasedCount = 0;
+
+    for (const record of this.records.values()) {
+      // Check if there's an active call with a release time that has passed
+      if (record.active_call_id && record.active_call_release_time && now >= record.active_call_release_time) {
+        logger.info("Transfer safety window expired - releasing line", {
+          phone: record.phone_number,
+          call_id: record.active_call_id,
+          held_for_minutes: Math.round((now - record.last_call_timestamp) / 60000),
+        });
+
+        record.active_call_id = null;
+        record.active_call_release_time = undefined;
+        releasedCount++;
+      }
+    }
+
+    if (releasedCount > 0) {
+      this.saveRecords();
+      logger.info("Released phone lines after transfer safety window", {
+        count: releasedCount,
+      });
+    }
+  }
 }
 
 export const dailyCallTracker = new DailyCallTrackerService();
 export { DailyCallRecord, CallAttempt, ProtectionConfig, CallDecision };
+
+// Periodic cleanup of expired transfer safety windows (every 5 minutes)
+setInterval(() => {
+  dailyCallTracker.cleanupExpiredTransfers();
+}, 5 * 60 * 1000);

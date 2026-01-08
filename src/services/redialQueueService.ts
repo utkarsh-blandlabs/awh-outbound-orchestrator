@@ -654,6 +654,8 @@ class RedialQueueService {
   /**
    * Add or update a lead in redial queue
    * Called from webhook after call completes
+   *
+   * @param isInbound - If true, doesn't count against daily limit (customer called us)
    */
   async addOrUpdateLead(
     leadId: string,
@@ -664,7 +666,8 @@ class RedialQueueService {
     state: string,
     outcome: string,
     callId: string,
-    scheduledCallbackTime?: number
+    scheduledCallbackTime?: number,
+    isInbound?: boolean
   ): Promise<void> {
     if (!this.queueConfig.enabled) {
       return;
@@ -741,18 +744,29 @@ class RedialQueueService {
       existing.last_name = lastName;
       existing.state = state; // Use most recent state
 
-      // Update lifetime attempts counter
-      existing.attempts += 1;
+      // Update attempt counters (ONLY for outbound calls, not inbound)
+      if (!isInbound) {
+        // Update lifetime attempts counter
+        existing.attempts += 1;
 
-      // Update daily attempts counter
-      const today = this.getCurrentDateEST();
-      if (existing.last_attempt_date === today) {
-        // Same day - increment today's counter
-        existing.attempts_today += 1;
+        // Update daily attempts counter
+        const today = this.getCurrentDateEST();
+        if (existing.last_attempt_date === today) {
+          // Same day - increment today's counter
+          existing.attempts_today += 1;
+        } else {
+          // New day - reset today's counter
+          existing.attempts_today = 1;
+          existing.last_attempt_date = today;
+        }
       } else {
-        // New day - reset today's counter
-        existing.attempts_today = 1;
-        existing.last_attempt_date = today;
+        logger.info("Inbound call - not counting against daily limit", {
+          lead_id: leadId,
+          phone: phoneNumber,
+          outcome,
+          current_attempts_today: existing.attempts_today,
+          current_attempts_lifetime: existing.attempts,
+        });
       }
 
       existing.last_call_timestamp = now;
@@ -834,8 +848,9 @@ class RedialQueueService {
         first_name: firstName,
         last_name: lastName,
         state: state,
-        attempts: 1, // Lifetime counter
-        attempts_today: 1, // Daily counter (first call today)
+        // Only count as attempt if it's outbound (we initiated the call)
+        attempts: isInbound ? 0 : 1, // Lifetime counter
+        attempts_today: isInbound ? 0 : 1, // Daily counter
         last_attempt_date: today, // Track which day this was
         last_call_timestamp: now,
         next_redial_timestamp: scheduledCallbackTime || (now + actualIntervalMs),
@@ -850,10 +865,12 @@ class RedialQueueService {
 
       this.records.set(key, newRecord);
 
-      logger.info("Added new lead to redial queue", {
+      logger.info(isInbound ? "Added new lead to redial queue (inbound - no attempt count)" : "Added new lead to redial queue", {
         lead_id: leadId,
         phone: phoneNumber,
         outcome,
+        is_inbound: isInbound || false,
+        attempts_counted: isInbound ? 0 : 1,
         next_redial: new Date(newRecord.next_redial_timestamp).toISOString(),
         next_interval_minutes: firstIntervalMinutes,
       });

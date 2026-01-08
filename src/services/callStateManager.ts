@@ -63,12 +63,7 @@ class CallStateManagerClass {
         call_id: callId,
         duration_ms: Date.now() - call.created_at,
       });
-
-      // Keep in cache for configured retention time (default 90 minutes)
-      const retentionMs = config.cache.completedRetentionMinutes * 60 * 1000;
-      setTimeout(() => {
-        this.pendingCalls.delete(callId);
-      }, retentionMs);
+      // Don't use setTimeout - cleanup interval will handle deletion
     }
   }
 
@@ -81,12 +76,7 @@ class CallStateManagerClass {
         call_id: callId,
         error,
       });
-
-      // Keep in cache for configured retention time (default 90 minutes)
-      const retentionMs = config.cache.completedRetentionMinutes * 60 * 1000;
-      setTimeout(() => {
-        this.pendingCalls.delete(callId);
-      }, retentionMs);
+      // Don't use setTimeout - cleanup interval will handle deletion
     }
   }
 
@@ -98,23 +88,35 @@ class CallStateManagerClass {
 
   cleanupOldCalls(): void {
     const now = Date.now();
-    const maxAge = config.cache.pendingMaxAgeMinutes * 60 * 1000;
+    const pendingMaxAge = config.cache.pendingMaxAgeMinutes * 60 * 1000;
+    const completedRetention = config.cache.completedRetentionMinutes * 60 * 1000;
 
-    let cleanedCount = 0;
+    let stalePendingCount = 0;
+    let completedCount = 0;
+
     for (const [callId, call] of this.pendingCalls.entries()) {
-      if (now - call.created_at > maxAge) {
+      // Remove stale pending calls (no webhook received)
+      if (call.status === "pending" && now - call.created_at > pendingMaxAge) {
         this.pendingCalls.delete(callId);
-        cleanedCount++;
-        logger.warn("Stale call removed", {
+        stalePendingCount++;
+        logger.warn("Stale pending call removed", {
           call_id: callId,
           lead_id: call.lead_id,
           age_minutes: Math.round((now - call.created_at) / 60000),
         });
       }
+      // Remove old completed/failed calls after retention period
+      else if ((call.status === "completed" || call.status === "failed") &&
+               now - call.created_at > completedRetention) {
+        this.pendingCalls.delete(callId);
+        completedCount++;
+      }
     }
 
-    if (cleanedCount > 0) {
-      logger.info(`Removed ${cleanedCount} stale calls`, {
+    if (stalePendingCount > 0 || completedCount > 0) {
+      logger.info("Cleanup completed", {
+        stale_pending_removed: stalePendingCount,
+        completed_removed: completedCount,
         remaining: this.pendingCalls.size,
       });
     }
