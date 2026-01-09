@@ -39,6 +39,7 @@ interface RedialQueueConfig {
   progressive_intervals: number[]; // Progressive intervals: [10, 30, 40, 60] minutes
   max_daily_attempts: number; // Max redial attempts PER DAY per lead (resets daily)
   daily_reset_hour: number; // Hour (0-23) to reset daily counters (default: 0 = 12:01 AM)
+  reset_timing: "midnight" | "business_hours"; // When to reset daily counters
   success_outcomes: string[]; // Outcomes that stop redialing
   retention_days: number; // Keep files for X days
   process_interval_minutes: number; // How often to check queue
@@ -84,6 +85,7 @@ class RedialQueueService {
       daily_reset_hour: parseInt(
         process.env["REDIAL_DAILY_RESET_HOUR"] || "0"
       ),
+      reset_timing: (process.env["REDIAL_RESET_TIMING"] || "business_hours") as "midnight" | "business_hours",
       success_outcomes: (
         process.env["REDIAL_SUCCESS_OUTCOMES"] ||
         "SALE,ACA,DNC,NOT_INTERESTED,DO_NOT_CALL"
@@ -161,11 +163,11 @@ class RedialQueueService {
   }
 
   /**
-   * Start midnight reset scheduler
-   * Runs every minute to check if it's midnight (12:01 AM EST) and resets daily counters
+   * Start daily reset scheduler
+   * Runs every minute to check reset timing (midnight or business hours)
    */
   private startMidnightResetScheduler(): void {
-    // Check every 1 minute for midnight
+    // Check every 1 minute for reset conditions
     this.midnightResetInterval = setInterval(async () => {
       try {
         const now = new Date();
@@ -183,12 +185,61 @@ class RedialQueueService {
         const currentTime = `${hour}:${minute}`;
         const today = this.getCurrentDateEST();
 
-        // Check if it's midnight (00:00 or 00:01) and we haven't reset today yet
-        if ((currentTime === "00:00" || currentTime === "00:01") && this.lastResetDate !== today) {
-          logger.info("Midnight detected - performing daily counter reset", {
+        let shouldReset = false;
+        let resetReason = "";
+
+        if (this.queueConfig.reset_timing === "midnight") {
+          // Midnight mode: Reset at 12:01 AM EST
+          if ((currentTime === "00:00" || currentTime === "00:01") && this.lastResetDate !== today) {
+            shouldReset = true;
+            resetReason = "midnight";
+          }
+        } else {
+          // Business hours mode: Reset before business starts or after business ends
+          // Get business hours from scheduler config (default 11:00-20:00)
+          const schedulerConfigPath = path.join(process.cwd(), "data", "scheduler-config.json");
+          let startTime = "11:00";
+          let endTime = "20:00";
+
+          try {
+            if (fs.existsSync(schedulerConfigPath)) {
+              const schedulerConfig = JSON.parse(fs.readFileSync(schedulerConfigPath, "utf-8"));
+              startTime = schedulerConfig.schedule?.startTime || "11:00";
+              endTime = schedulerConfig.schedule?.endTime || "20:00";
+            }
+          } catch (error) {
+            // Use defaults if config read fails
+          }
+
+          // Calculate reset times: 5 minutes before start, or at end time
+          const startParts = startTime.split(":").map(Number);
+          const endParts = endTime.split(":").map(Number);
+          const startHour = startParts[0] || 11;
+          const startMin = startParts[1] || 0;
+          const endHour = endParts[0] || 20;
+          const endMin = endParts[1] || 0;
+          const currentHour = parseInt(hour);
+          const currentMinute = parseInt(minute);
+
+          // Reset 5 minutes before business hours start (e.g., 10:55 AM for 11:00 AM start)
+          const resetBeforeStart = currentHour === startHour && currentMinute === Math.max(0, startMin - 5);
+
+          // Reset exactly at business hours end (e.g., 20:00 for 8:00 PM end)
+          const resetAfterEnd = currentHour === endHour && currentMinute === endMin;
+
+          if ((resetBeforeStart || resetAfterEnd) && this.lastResetDate !== today) {
+            shouldReset = true;
+            resetReason = resetBeforeStart ? "before_business_hours" : "after_business_hours";
+          }
+        }
+
+        if (shouldReset) {
+          logger.info("Daily reset triggered", {
             time_est: currentTime,
             date: today,
             last_reset_date: this.lastResetDate,
+            reset_reason: resetReason,
+            reset_timing_mode: this.queueConfig.reset_timing,
           });
 
           // Reload all records to ensure we have latest data
@@ -200,22 +251,26 @@ class RedialQueueService {
           // Mark that we've reset for this day
           this.lastResetDate = today;
 
-          logger.info("Midnight reset completed successfully", {
+          logger.info("Daily reset completed successfully", {
             date: today,
             total_records: this.records.size,
+            reset_reason: resetReason,
           });
         }
       } catch (error: any) {
-        logger.error("Error in midnight reset scheduler", {
+        logger.error("Error in daily reset scheduler", {
           error: error.message,
           stack: error.stack,
         });
       }
     }, 60000); // Check every 60 seconds
 
-    logger.info("Midnight reset scheduler started", {
+    logger.info("Daily reset scheduler started", {
       check_interval_seconds: 60,
-      reset_hour_est: "00:01 AM",
+      reset_timing: this.queueConfig.reset_timing,
+      note: this.queueConfig.reset_timing === "business_hours"
+        ? "Resets before business start and after business end"
+        : "Resets at midnight (12:01 AM EST)",
     });
   }
 
@@ -1605,6 +1660,68 @@ class RedialQueueService {
       logger.error("Failed to cleanup old redial queue files", {
         error: error.message,
       });
+    }
+  }
+
+  /**
+   * TEST MODE: Manually reset daily counters for testing
+   * Reloads all records and resets daily attempt counters
+   * Only available when TEST_MODE_ENABLED=true
+   */
+  async resetDailyCountersManual(): Promise<{
+    leads_reset: number;
+    leads_moved_to_pending: number;
+  }> {
+    try {
+      logger.warn("TEST MODE: Manual daily counter reset triggered");
+
+      // Reload all recent records
+      await this.loadAllRecentRecords();
+
+      // Track reset stats
+      let leadsReset = 0;
+      let leadsMoved = 0;
+
+      for (const record of this.records.values()) {
+        if (record.attempts_today > 0) {
+          record.attempts_today = 0;
+          leadsReset++;
+        }
+
+        if (record.status === "daily_max_reached") {
+          record.status = "pending";
+          record.next_redial_timestamp = this.getNowEST(); // Ready to call now
+          leadsMoved++;
+          logger.info("TEST MODE: Reset lead from daily_max_reached to pending", {
+            phone: record.phone_number,
+            lead_id: record.lead_id,
+            total_lifetime_attempts: record.attempts,
+          });
+        }
+
+        // Update timestamp
+        record.updated_at = this.getNowEST();
+      }
+
+      // Save updated records
+      await this.saveRecords();
+
+      logger.warn("TEST MODE: Daily counter reset completed", {
+        leads_reset: leadsReset,
+        leads_moved_to_pending: leadsMoved,
+        total_records: this.records.size,
+      });
+
+      return {
+        leads_reset: leadsReset,
+        leads_moved_to_pending: leadsMoved,
+      };
+    } catch (error: any) {
+      logger.error("TEST MODE: Error resetting daily counters", {
+        error: error.message,
+        stack: error.stack,
+      });
+      throw error;
     }
   }
 

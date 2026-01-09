@@ -26,6 +26,7 @@ class SmsTrackerService {
   private dataDir: string;
   private currentDate: string;
   private config: SmsTrackerConfig;
+  private persistenceFailureDetected: boolean = false; // Failsafe flag
 
   constructor() {
     this.dataDir = path.join(process.cwd(), "data", "sms-tracker");
@@ -131,14 +132,26 @@ class SmsTrackerService {
 
       fs.writeFileSync(filePath, JSON.stringify(data, null, 2));
 
+      // Verify file was actually written
+      if (!fs.existsSync(filePath)) {
+        throw new Error(`SMS tracker file not found after write: ${filePath}`);
+      }
+
       logger.debug("Saved SMS tracker records", {
         date: this.currentDate,
         count: this.records.size,
+        file: filePath,
       });
     } catch (error: any) {
-      logger.error("Failed to save SMS tracker records", {
+      logger.error("CRITICAL: Failed to save SMS tracker records - SMS spam prevention disabled!", {
         error: error.message,
+        file: filePath,
+        stack: error.stack,
       });
+      // Set failsafe flag to block ALL SMS until this is fixed
+      this.persistenceFailureDetected = true;
+      // Throw error to make failure visible in logs
+      throw new Error(`SMS tracker save failed: ${error.message}`);
     }
   }
 
@@ -149,6 +162,15 @@ class SmsTrackerService {
   canSendSms(phoneNumber: string): boolean {
     if (!this.config.enabled) {
       return true; // If tracker disabled, allow all SMS
+    }
+
+    // FAILSAFE: If persistence failed, block ALL SMS to prevent spam
+    if (this.persistenceFailureDetected) {
+      logger.warn("SMS blocked - persistence failure detected", {
+        phone: phoneNumber,
+        reason: "SMS tracker cannot save to disk - blocking all SMS to prevent spam",
+      });
+      return false;
     }
 
     // Check if date rolled over (new day)
@@ -290,6 +312,38 @@ class SmsTrackerService {
         error: error.message,
       });
     }
+  }
+
+  /**
+   * TEST MODE: Reset SMS tracker for testing
+   * Clears all records and deletes today's file
+   * Only available when TEST_MODE_ALLOW_SMS_RESET=true
+   */
+  async resetForTesting(): Promise<number> {
+    const recordsCleared = this.records.size;
+    const filePath = this.getRecordFilePath(this.currentDate);
+
+    // Clear in-memory records
+    this.records.clear();
+
+    // Clear persistence failure flag
+    this.persistenceFailureDetected = false;
+
+    // Delete today's file if it exists
+    if (fs.existsSync(filePath)) {
+      fs.unlinkSync(filePath);
+      logger.warn("TEST MODE: Deleted SMS tracker file", {
+        file: filePath,
+        records_cleared: recordsCleared,
+      });
+    }
+
+    logger.warn("TEST MODE: SMS tracker reset", {
+      records_cleared: recordsCleared,
+      date: this.currentDate,
+    });
+
+    return recordsCleared;
   }
 }
 
