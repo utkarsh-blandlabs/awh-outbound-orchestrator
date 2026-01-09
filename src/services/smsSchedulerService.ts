@@ -10,6 +10,7 @@ import { logger } from "../utils/logger";
 import { timezoneHelper } from "../utils/timezoneHelper";
 import axios from "axios";
 import { config } from "../config";
+import { smsTrackerService } from "./smsTrackerService";
 
 interface SMSTemplate {
   position: number;
@@ -447,9 +448,29 @@ class SMSSchedulerService {
     message = message.replace(/\{\{first_name\}\}/g, lead.first_name || "");
     message = message.replace(/\{\{last_name\}\}/g, lead.last_name || "");
 
+    // CRITICAL: Check SMS tracker to enforce daily limit (SMS_MAX_PER_DAY)
+    // This prevents sending multiple SMS on the same day
+    const canSendSms = smsTrackerService.canSendSms(lead.phone_number);
+    if (!canSendSms) {
+      const currentCount = smsTrackerService.getSmsCount(lead.phone_number);
+      const maxPerDay = smsTrackerService.getConfig().max_sms_per_day;
+      logger.info("SMS scheduler: daily limit reached - skipping", {
+        lead_id: lead.lead_id,
+        phone: lead.phone_number,
+        position: nextPosition,
+        current_count: currentCount,
+        max_per_day: maxPerDay,
+        note: "Will retry tomorrow after tracker resets at midnight",
+      });
+      return "skipped";
+    }
+
     // Send SMS via Bland AI
     try {
       await this.sendSMS(lead.phone_number, message);
+
+      // Record SMS sent in tracker
+      await smsTrackerService.recordSmsSent(lead.phone_number);
 
       logger.info("SMS sent successfully", {
         lead_id: lead.lead_id,
