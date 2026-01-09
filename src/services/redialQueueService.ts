@@ -427,10 +427,31 @@ class RedialQueueService {
    * CHANGED: Previously used lead_id + phone to allow same phone in different lists
    * NOW: Use phone only to prevent duplicate calls to same number from different lists
    * Per Delaine's feedback: "treat as 1 lead, otherwise they would get double the redials"
+   *
+   * CRITICAL FIX (Jan 9): Normalize to E.164 format to match dailyCallTracker
+   * This ensures the safety check hasActiveCall() works correctly
    */
   private generateKey(leadId: string, phoneNumber: string): string {
-    const normalized = phoneNumber.replace(/\D/g, "");
-    return normalized; // Use phone number only, not lead_id + phone
+    // Remove all non-digit characters
+    const digits = phoneNumber.replace(/\D/g, "");
+
+    // Normalize to E.164 format (match dailyCallTracker normalization)
+    // If it starts with 1 and is 11 digits, add + prefix
+    if (digits.startsWith("1") && digits.length === 11) {
+      return `+${digits}`; // Returns "+15038513591"
+    }
+
+    // If 10 digits (no country code), add +1 prefix
+    if (digits.length === 10) {
+      return `+1${digits}`; // Returns "+15038513591"
+    }
+
+    // Otherwise return as-is with + prefix if it looks valid
+    if (digits.length >= 10) {
+      return `+${digits}`;
+    }
+
+    return `+1${digits}`; // Fallback: assume US number
   }
 
   /**
