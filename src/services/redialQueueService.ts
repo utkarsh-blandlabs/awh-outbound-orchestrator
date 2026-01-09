@@ -1051,10 +1051,8 @@ class RedialQueueService {
     try {
       const now = this.getNowEST();
 
-      // Safety Check #4: Reload ALL recent records to get latest data (within retention period)
-      await this.loadAllRecentRecords();
-
-      // Safety Check #5: Reset daily counters if new day detected
+      // Safety Check #4: Reset daily counters if new day detected
+      // Note: resetDailyCountersIfNeeded() already calls loadAllRecentRecords() if reset is needed
       await this.resetDailyCountersIfNeeded();
 
       // SAFE FILTERING: Multiple validation layers
