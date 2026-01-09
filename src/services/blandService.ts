@@ -42,7 +42,7 @@ class BlandService {
     // Wait for rate limit slot before proceeding
     // This enforces:
     // 1. Global limit: Max 5 calls/sec (Enterprise: 5.5/sec)
-    // 2. Per-number limit: Min 10 seconds between calls to same number
+    // 2. Per-number limit: Min 2 minutes (120 seconds) between calls to same number
     const waitTime = blandRateLimiter.getWaitTime(payload.phoneNumber);
     if (waitTime > 0) {
       logger.info("Rate limit: waiting before call", {

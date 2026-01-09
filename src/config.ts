@@ -98,7 +98,7 @@ export const config = {
       process.env["RATE_LIMITER_MAX_CALLS_PER_SECOND"] || "5"
     ),
     sameNumberIntervalMs: parseInt(
-      process.env["RATE_LIMITER_SAME_NUMBER_INTERVAL_MS"] || "10000"
+      process.env["RATE_LIMITER_SAME_NUMBER_INTERVAL_MS"] || "120000" // 2 minutes
     ),
   },
 

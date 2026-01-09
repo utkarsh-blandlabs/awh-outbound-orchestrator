@@ -2104,6 +2104,7 @@ router.post("/test/reset-daily-counters", async (req: Request, res: Response) =>
 /**
  * POST /api/admin/test/trigger-call
  * Manually trigger a test call (bypasses business hours in test mode)
+ * CRITICAL FIX: Now uses orchestrator flow to enforce rate limiting and active call checks
  */
 router.post("/test/trigger-call", async (req: Request, res: Response) => {
   try {
@@ -2123,8 +2124,6 @@ router.post("/test/trigger-call", async (req: Request, res: Response) => {
       });
     }
 
-    const { blandService } = require("../services/blandService");
-
     logger.warn("TEST MODE: Manual test call triggered via admin API", {
       phone: phone_number,
       name: `${first_name} ${last_name}`,
@@ -2132,10 +2131,18 @@ router.post("/test/trigger-call", async (req: Request, res: Response) => {
       bypassed_business_hours: process.env["TEST_MODE_BYPASS_BUSINESS_HOURS"] === "true",
     });
 
-    const result = await blandService.sendOutboundCall({
-      phoneNumber: phone_number,
-      firstName: first_name,
-      lastName: last_name,
+    // CRITICAL FIX: Use orchestrator instead of calling blandService directly
+    // This enforces rate limiting and active call checks
+    const { handleAwhOutbound } = await import("../logic/awhOrchestrator");
+
+    const result = await handleAwhOutbound({
+      lead_id: `test_${Date.now()}`,
+      phone_number: phone_number,
+      first_name: first_name,
+      last_name: last_name,
+      list_id: "test_mode",
+      state: "XX",
+      status: "TEST",
     });
 
     res.json({
@@ -2145,7 +2152,7 @@ router.post("/test/trigger-call", async (req: Request, res: Response) => {
       phone: phone_number,
       test_mode: true,
       bypassed_business_hours: process.env["TEST_MODE_BYPASS_BUSINESS_HOURS"] === "true",
-      note: "Monitor logs for call progress",
+      note: "Monitor logs for call progress. Rate limiter enforced: min 2 minutes between calls to same number.",
     });
   } catch (error: any) {
     logger.error("Error triggering test call", { error: error.message });

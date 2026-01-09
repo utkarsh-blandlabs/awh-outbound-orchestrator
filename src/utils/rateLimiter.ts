@@ -3,14 +3,17 @@
  *
  * Enforces two types of limits:
  * 1. Global rate limit: Enterprise = 20,000 calls/hour (5.5 calls/sec)
- * 2. Per-number limit: Cannot call same number within 10 seconds
+ * 2. Per-number limit: Cannot call same number within 2 minutes (120 seconds)
  *
- * This prevents hitting Bland AI's 429 rate limit errors in production
+ * This prevents:
+ * - Hitting Bland AI's 429 rate limit errors
+ * - Back-to-back calls to same customer (poor experience)
+ * - Duplicate calls during redial attempts
  *
  * Can be controlled via environment variables:
  * - RATE_LIMITER_ENABLED=true/false
  * - RATE_LIMITER_MAX_CALLS_PER_SECOND=5
- * - RATE_LIMITER_SAME_NUMBER_INTERVAL_MS=10000
+ * - RATE_LIMITER_SAME_NUMBER_INTERVAL_MS=120000
  */
 
 import { config } from "../config";
@@ -41,7 +44,7 @@ class BlandRateLimiter {
     this.config = {
       enabled: true, // Enabled by default
       maxCallsPerSecond: 5, // Conservative: Enterprise allows 5.5
-      sameNumberIntervalMs: 10000, // 10 seconds
+      sameNumberIntervalMs: 120000, // 2 minutes (120 seconds)
       ...config,
     };
 
