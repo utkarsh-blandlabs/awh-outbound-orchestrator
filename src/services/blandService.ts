@@ -189,7 +189,16 @@ class BlandService {
 
       // Record SMS sent if it was included in the request
       if (shouldIncludeSms) {
-        await smsTrackerService.recordSmsSent(payload.phoneNumber);
+        try {
+          await smsTrackerService.recordSmsSent(payload.phoneNumber);
+        } catch (error: any) {
+          // SMS tracker failed - this is critical but don't block the call
+          logger.error("CRITICAL: SMS tracker failed to record SMS - spam prevention may be broken!", {
+            phone: payload.phoneNumber,
+            error: error.message,
+            call_id: response.call_id,
+          });
+        }
       }
 
       return {

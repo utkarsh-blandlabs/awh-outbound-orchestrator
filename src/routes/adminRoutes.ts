@@ -1967,4 +1967,193 @@ router.post("/redial-queue/cleanup", async (req: Request, res: Response) => {
   }
 });
 
+// ============================================================================
+// TEST MODE ENDPOINTS - For Development/Testing Only
+// ============================================================================
+
+/**
+ * GET /api/admin/test/status
+ * Check test mode status and current system state
+ */
+router.get("/test/status", (req: Request, res: Response) => {
+  try {
+    const testModeEnabled = process.env["TEST_MODE_ENABLED"] === "true";
+    const bypassBusinessHours = process.env["TEST_MODE_BYPASS_BUSINESS_HOURS"] === "true";
+    const allowSmsReset = process.env["TEST_MODE_ALLOW_SMS_RESET"] === "true";
+
+    const businessHoursActive = schedulerService.isActive();
+
+    // Get SMS tracker info
+    const { smsTrackerService } = require("../services/smsTrackerService");
+    const smsConfig = smsTrackerService.getConfig();
+
+    res.json({
+      success: true,
+      test_mode: {
+        enabled: testModeEnabled,
+        bypass_business_hours: bypassBusinessHours,
+        allow_sms_reset: allowSmsReset,
+        note: bypassBusinessHours
+          ? "Manual test calls bypass business hours. Queue processors still respect business hours."
+          : "Test mode allows manual test calls and resetting limits",
+      },
+      current_time: new Date().toISOString(),
+      business_hours: {
+        active: businessHoursActive,
+        config: schedulerService.getConfig().schedule,
+        note: "Queue processors (Convoso, Redial) ALWAYS respect these hours - no test mode bypass",
+      },
+      sms_tracker: {
+        enabled: smsConfig.enabled,
+        max_per_day: smsConfig.max_sms_per_day,
+      },
+      safety: {
+        queue_processor_respects_hours: true,
+        redial_queue_respects_hours: true,
+        sms_scheduler_respects_tcpa: true,
+        manual_test_calls_only: bypassBusinessHours,
+      },
+      warning: testModeEnabled
+        ? "TEST_MODE is enabled - disable in production!"
+        : null,
+    });
+  } catch (error: any) {
+    logger.error("Error getting test status", { error: error.message });
+    res.status(500).json({
+      success: false,
+      error: error.message,
+    });
+  }
+});
+
+/**
+ * POST /api/admin/test/reset-sms-tracker
+ * Reset SMS tracker to allow testing SMS again
+ */
+router.post("/test/reset-sms-tracker", async (req: Request, res: Response) => {
+  try {
+    // Check if test mode allows SMS reset
+    if (process.env["TEST_MODE_ALLOW_SMS_RESET"] !== "true") {
+      return res.status(403).json({
+        success: false,
+        error: "TEST_MODE_ALLOW_SMS_RESET is not enabled",
+        note: "Set TEST_MODE_ALLOW_SMS_RESET=true in .env to use this endpoint",
+      });
+    }
+
+    const { smsTrackerService } = require("../services/smsTrackerService");
+    const recordsCleared = await smsTrackerService.resetForTesting();
+
+    logger.warn("TEST MODE: SMS tracker reset via admin API", {
+      records_cleared: recordsCleared,
+      requested_by: req.ip,
+    });
+
+    res.json({
+      success: true,
+      message: "SMS tracker reset successfully",
+      records_cleared: recordsCleared,
+      note: "You can now test SMS sending again",
+    });
+  } catch (error: any) {
+    logger.error("Error resetting SMS tracker", { error: error.message });
+    res.status(500).json({
+      success: false,
+      error: error.message,
+    });
+  }
+});
+
+/**
+ * POST /api/admin/test/reset-daily-counters
+ * Reset daily call attempt counters for redial queue
+ */
+router.post("/test/reset-daily-counters", async (req: Request, res: Response) => {
+  try {
+    if (process.env["TEST_MODE_ENABLED"] !== "true") {
+      return res.status(403).json({
+        success: false,
+        error: "Test mode is not enabled",
+        note: "Set TEST_MODE_ENABLED=true in .env to use test endpoints",
+      });
+    }
+
+    const { redialQueueService } = require("../services/redialQueueService");
+    const result = await redialQueueService.resetDailyCountersManual();
+
+    logger.warn("TEST MODE: Daily counters reset via admin API", {
+      leads_reset: result.leads_reset,
+      requested_by: req.ip,
+    });
+
+    res.json({
+      success: true,
+      message: "Daily counters reset successfully",
+      ...result,
+      note: "Leads that hit daily max can now be called again",
+    });
+  } catch (error: any) {
+    logger.error("Error resetting daily counters", { error: error.message });
+    res.status(500).json({
+      success: false,
+      error: error.message,
+    });
+  }
+});
+
+/**
+ * POST /api/admin/test/trigger-call
+ * Manually trigger a test call (bypasses business hours in test mode)
+ */
+router.post("/test/trigger-call", async (req: Request, res: Response) => {
+  try {
+    if (process.env["TEST_MODE_ENABLED"] !== "true") {
+      return res.status(403).json({
+        success: false,
+        error: "Test mode is not enabled",
+      });
+    }
+
+    const { phone_number, first_name, last_name } = req.body;
+
+    if (!phone_number || !first_name || !last_name) {
+      return res.status(400).json({
+        success: false,
+        error: "Missing required fields: phone_number, first_name, last_name",
+      });
+    }
+
+    const { blandService } = require("../services/blandService");
+
+    logger.warn("TEST MODE: Manual test call triggered via admin API", {
+      phone: phone_number,
+      name: `${first_name} ${last_name}`,
+      requested_by: req.ip,
+      bypassed_business_hours: process.env["TEST_MODE_BYPASS_BUSINESS_HOURS"] === "true",
+    });
+
+    const result = await blandService.sendOutboundCall({
+      phoneNumber: phone_number,
+      firstName: first_name,
+      lastName: last_name,
+    });
+
+    res.json({
+      success: true,
+      message: "Test call initiated successfully",
+      call_id: result.call_id,
+      phone: phone_number,
+      test_mode: true,
+      bypassed_business_hours: process.env["TEST_MODE_BYPASS_BUSINESS_HOURS"] === "true",
+      note: "Monitor logs for call progress",
+    });
+  } catch (error: any) {
+    logger.error("Error triggering test call", { error: error.message });
+    res.status(500).json({
+      success: false,
+      error: error.message,
+    });
+  }
+});
+
 export default router;

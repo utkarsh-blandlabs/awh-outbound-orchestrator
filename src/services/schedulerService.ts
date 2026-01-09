@@ -120,8 +120,13 @@ class SchedulerService {
 
   /**
    * Check if system is currently active based on schedule
+   * SAFETY: Does NOT bypass business hours for test mode
+   * Queue processors ALWAYS respect business hours for real customers
    */
   isActive(): boolean {
+    // REMOVED: Global test mode bypass - was causing queue processors to run outside business hours
+    // Test mode now only affects manual test calls via /api/admin/test/trigger-call endpoint
+
     if (!this.config.enabled) {
       return false;
     }
