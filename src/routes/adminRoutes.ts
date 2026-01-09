@@ -2152,7 +2152,7 @@ router.post("/test/trigger-call", async (req: Request, res: Response) => {
       phone: phone_number,
       test_mode: true,
       bypassed_business_hours: process.env["TEST_MODE_BYPASS_BUSINESS_HOURS"] === "true",
-      note: "Monitor logs for call progress. Rate limiter enforced: min 10 seconds between calls to same number.",
+      note: "Monitor logs for call progress. Rate limiter enforced: min 2 minutes between calls to same number.",
     });
   } catch (error: any) {
     logger.error("Error triggering test call", { error: error.message });
