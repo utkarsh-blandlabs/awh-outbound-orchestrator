@@ -310,6 +310,8 @@ async function triggerOutboundCall(
     phoneNumber: normalizedPhone,
     firstName: payload.first_name,
     lastName: payload.last_name,
+    leadId: payload.lead_id,
+    listId: payload.list_id,
   });
 }
 

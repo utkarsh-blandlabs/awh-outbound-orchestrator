@@ -9,6 +9,7 @@ import awhWebhookRouter from "./routes/awhWebhook";
 import blandWebhookRouter from "./routes/blandWebhook";
 import callbackWebhookRouter from "./routes/callbackWebhook";
 import smsWebhookRouter from "./routes/smsWebhook";
+import pathwayWebhookRouter from "./routes/pathwayWebhook";
 import adminRouter from "./routes/adminRoutes";
 import blocklistRouter from "./routes/blocklistRoutes";
 import webhookLogRouter from "./routes/webhookLogRoutes";
@@ -79,6 +80,7 @@ app.use("/webhooks", awhWebhookRouter);
 app.use("/webhooks", blandWebhookRouter);
 app.use("/webhooks", callbackWebhookRouter);
 app.use("/webhooks", smsWebhookRouter);
+app.use("/webhooks", pathwayWebhookRouter);
 
 // Admin API routes (for Retool dashboard)
 app.use("/api/admin", adminRouter);
@@ -134,6 +136,8 @@ const server = app.listen(PORT, () => {
   console.log(`  POST http://localhost:${PORT}/webhooks/bland-callback`);
   console.log(`  POST http://localhost:${PORT}/webhooks/call-back`);
   console.log(`  POST http://localhost:${PORT}/webhooks/sms-reply`);
+  console.log(`  POST http://localhost:${PORT}/webhooks/pathway/update-zip`);
+  console.log(`  POST http://localhost:${PORT}/webhooks/pathway/update-lead-data`);
   console.log("");
   console.log("Admin API endpoints:");
   console.log(`  GET  http://localhost:${PORT}/api/admin/calls/active`);

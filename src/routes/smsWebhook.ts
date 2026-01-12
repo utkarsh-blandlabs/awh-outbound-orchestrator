@@ -17,26 +17,42 @@ import * as path from "path";
 
 const router = Router();
 
-// TCPA-compliant DNC keywords (comprehensive list)
+// TCPA-compliant DNC keywords (comprehensive list with typo variations)
 const DNC_KEYWORDS = [
   "STOP",
   "STOPALL",
+  "STOOP", // Common typo
+  "STOPP", // Common typo
+  "ST0P", // 0 instead of O
+  "STP",  // Missing O
+  "STOPS", // Plural
   "UNSUBSCRIBE",
+  "UNSUB",
+  "UNSUSBCRIBE", // Common typo
   "CANCEL",
+  "CANCLE", // Common typo
   "END",
   "QUIT",
   "REMOVE",
+  "REMOVEME",
   "OPT OUT",
   "OPTOUT",
+  "OPT-OUT",
   "DO NOT CONTACT",
   "DO NOT CALL",
   "DO NOT TEXT",
   "DON'T CALL",
   "DON'T TEXT",
+  "DONT CALL",
+  "DONT TEXT",
   "TAKE ME OFF",
   "REMOVE ME",
   "DELETE MY NUMBER",
+  "DELETE ME",
   "DNC",
+  "NO MORE",
+  "LEAVE ME ALONE",
+  "NOT INTERESTED",
 ];
 
 // Callback request keywords
@@ -100,17 +116,29 @@ router.post("/sms-reply", async (req: Request, res: Response) => {
   const requestId = `sms_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`;
 
   try {
-    logger.info("SMS reply webhook received", {
+    // CRITICAL DEBUG: Log full payload to understand Bland.ai's format
+    logger.info("SMS reply webhook received - FULL PAYLOAD", {
       requestId,
+      full_body: req.body,
       from: req.body.from,
       body: req.body.body,
+      message: req.body.message, // Check if Bland uses "message" instead of "body"
+      text: req.body.text,       // Check if Bland uses "text" instead of "body"
+      content: req.body.content, // Check if Bland uses "content" instead of "body"
     });
 
     const payload: SMSWebhookPayload = req.body;
 
     if (!payload.from || !payload.body) {
+      logger.warn("SMS webhook validation failed - missing fields", {
+        requestId,
+        has_from: !!payload.from,
+        has_body: !!payload.body,
+        all_fields: Object.keys(req.body),
+      });
       return res.status(400).json({
         error: "Missing required fields: from, body",
+        received_fields: Object.keys(req.body),
       });
     }
 

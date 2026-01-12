@@ -38,6 +38,8 @@ class BlandService {
     phoneNumber: string;
     firstName: string;
     lastName: string;
+    leadId?: string;
+    listId?: string;
   }): Promise<BlandOutboundCallResponse> {
     // Wait for rate limit slot before proceeding
     // This enforces:
@@ -59,10 +61,12 @@ class BlandService {
 
     // IMPORTANT: Build request_data (parameters) for Bland pathway to access
     // This is how the AI can retrieve customer information during the call
-    // The pathway accesses these via {{first_name}} and {{last_name}} syntax
+    // The pathway accesses these via {{first_name}}, {{last_name}}, {{lead_id}}, {{list_id}} syntax
     const requestData: Record<string, any> = {
       first_name: payload.firstName,
       last_name: payload.lastName,
+      ...(payload.leadId && { lead_id: payload.leadId }),
+      ...(payload.listId && { list_id: payload.listId }),
     };
 
     // Get templates from config (WITHOUT replacing placeholders)
