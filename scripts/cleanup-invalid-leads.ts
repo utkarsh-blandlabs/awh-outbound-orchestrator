@@ -135,7 +135,7 @@ async function cleanupQueue(dryRun: boolean = false): Promise<void> {
     }> = [];
     let removed = 0;
     let skippedActive = 0;
-    const removalReasons: Record<string, number> = {
+    const removalReasons = {
       empty_list_id: 0,
       invalid_phone: 0,
       both: 0,
@@ -165,17 +165,17 @@ async function cleanupQueue(dryRun: boolean = false): Promise<void> {
       let reason = "";
       if (hasEmptyListId && hasInvalidPhone) {
         reason = "Empty list_id AND invalid phone number";
-        removalReasons["both"]++;
+        removalReasons.both++;
         removed++;
         removedLeads.push({ lead, reason, file });
       } else if (hasEmptyListId) {
         reason = "Empty list_id (cannot update Convoso)";
-        removalReasons["empty_list_id"]++;
+        removalReasons.empty_list_id++;
         removed++;
         removedLeads.push({ lead, reason, file });
       } else if (hasInvalidPhone) {
         reason = "Invalid phone number (less than 10 digits)";
-        removalReasons["invalid_phone"]++;
+        removalReasons.invalid_phone++;
         removed++;
         removedLeads.push({ lead, reason, file });
       } else {
@@ -188,9 +188,9 @@ async function cleanupQueue(dryRun: boolean = false): Promise<void> {
     allRemovedLeads.push(...removedLeads);
 
     console.log(`\nREMOVAL BREAKDOWN:`);
-    console.log(`  Empty list_id only:   ${removalReasons["empty_list_id"]}`);
-    console.log(`  Invalid phone only:   ${removalReasons["invalid_phone"]}`);
-    console.log(`  Both issues:          ${removalReasons["both"]}`);
+    console.log(`  Empty list_id only:   ${removalReasons.empty_list_id}`);
+    console.log(`  Invalid phone only:   ${removalReasons.invalid_phone}`);
+    console.log(`  Both issues:          ${removalReasons.both}`);
     console.log(`  Total to remove:      ${removed} ❌`);
     if (skippedActive > 0) {
       console.log(`  Skipped (active):     ${skippedActive} ⚠️  (being called today)`);
