@@ -19,11 +19,12 @@ Safely removes leads from the redial queue that:
 
 ## 🔒 Safety Features
 
-1. ✅ **Skips active leads** (attempts_today > 0 or status = "pending")
+1. ✅ **Skips active leads** (attempts_today > 0 or status = "pending") - unless using `--force` flag
 2. ✅ **Creates backups** before making changes
 3. ✅ **Saves removed leads** to separate file for review
 4. ✅ **Dry-run mode** for preview without changes
 5. ✅ **Detailed reporting** showing exactly what will be removed
+6. ✅ **Force mode** available to remove ALL invalid leads (outside business hours)
 
 ---
 
@@ -137,6 +138,34 @@ npx ts-node scripts/cleanup-invalid-leads.ts
 ```
 
 **Result**: Clean removal of ALL 2,669 invalid leads (100%), no downtime
+
+---
+
+#### **Option 4: Force Mode (Remove ALL Invalid Leads - Outside Business Hours Only)**
+
+⚠️ **Use with caution!** This bypasses safety checks and removes ALL invalid leads including those with `attempts_today > 0`.
+
+```bash
+# Preview what will be removed in force mode
+npx ts-node scripts/cleanup-invalid-leads.ts --dry-run --force
+
+# Apply force cleanup (removes ALL invalid leads)
+npx ts-node scripts/cleanup-invalid-leads.ts --force
+```
+
+**When to use `--force`:**
+
+- ✅ Outside business hours (before 9 AM EST or after 8 PM EST)
+- ✅ Orchestrator is stopped
+- ✅ You want to remove ALL invalid leads regardless of today's call status
+
+**When NOT to use `--force`:**
+
+- ❌ During business hours (9 AM - 8 PM EST)
+- ❌ When orchestrator is running and actively making calls
+- ❌ If you're unsure about the impact
+
+**Result**: Removes 100% of invalid leads (including those called today)
 
 ---
 
