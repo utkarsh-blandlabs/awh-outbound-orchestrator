@@ -17,8 +17,10 @@
  *   pm2 start awh-orchestrator
  *
  * Usage:
- *   npx ts-node scripts/cleanup-invalid-leads.ts --dry-run  # Preview only
- *   npx ts-node scripts/cleanup-invalid-leads.ts            # Apply cleanup
+ *   npx ts-node scripts/cleanup-invalid-leads.ts --dry-run         # Preview only
+ *   npx ts-node scripts/cleanup-invalid-leads.ts                   # Apply cleanup (safe mode)
+ *   npx ts-node scripts/cleanup-invalid-leads.ts --force           # Remove ALL invalid leads (ignores safety checks)
+ *   npx ts-node scripts/cleanup-invalid-leads.ts --dry-run --force # Preview with force mode
  */
 
 import * as fs from "fs";
@@ -85,11 +87,15 @@ function analyzeQueue(queue: Record<string, RedialQueueLead>) {
   };
 }
 
-async function cleanupQueue(dryRun: boolean = false): Promise<void> {
+async function cleanupQueue(dryRun: boolean = false, force: boolean = false): Promise<void> {
   console.log("\n" + "=".repeat(70));
   console.log("REDIAL QUEUE CLEANUP - REMOVE INVALID LEADS");
   console.log("=".repeat(70));
-  console.log(`Mode: ${dryRun ? "DRY RUN (preview only)" : "APPLY CHANGES"}\n`);
+  console.log(`Mode: ${dryRun ? "DRY RUN (preview only)" : "APPLY CHANGES"}`);
+  if (force) {
+    console.log(`⚠️  FORCE MODE: Ignoring safety checks (removing active leads)`);
+  }
+  console.log("");
 
   // Find all redial queue files
   const files = fs
@@ -146,19 +152,21 @@ async function cleanupQueue(dryRun: boolean = false): Promise<void> {
       const hasInvalidPhone =
         !lead.phone_number || lead.phone_number.replace(/\D/g, "").length < 10;
 
-      // SAFETY CHECK: Don't remove leads that are actively being processed
-      const isActiveToday = lead.attempts_today > 0;
-      const isPending = lead.status === "pending";
-      const isBeingCalled = isActiveToday || isPending;
+      // SAFETY CHECK: Don't remove leads that are actively being processed (unless --force)
+      if (!force) {
+        const isActiveToday = lead.attempts_today > 0;
+        const isPending = lead.status === "pending";
+        const isBeingCalled = isActiveToday || isPending;
 
-      if (isBeingCalled && (hasEmptyListId || hasInvalidPhone)) {
-        // Keep lead but mark it for manual review
-        console.log(
-          `  ⚠️  SAFETY: Keeping active lead despite issues: ${lead.lead_id} (${lead.phone_number})`
-        );
-        cleanedQueue[key] = lead;
-        skippedActive++;
-        continue;
+        if (isBeingCalled && (hasEmptyListId || hasInvalidPhone)) {
+          // Keep lead but mark it for manual review
+          console.log(
+            `  ⚠️  SAFETY: Keeping active lead despite issues: ${lead.lead_id} (${lead.phone_number})`
+          );
+          cleanedQueue[key] = lead;
+          skippedActive++;
+          continue;
+        }
       }
 
       // Determine removal reason
@@ -286,12 +294,15 @@ async function cleanupQueue(dryRun: boolean = false): Promise<void> {
   console.log(`  - Cleaner logs and better performance ✅`);
 
   // Safety warning if leads are still being called
-  if (totalBefore > totalAfter && totalRemoved > 0) {
-    console.log(`\n⚠️  IMPORTANT: Some invalid leads may still get called today`);
-    console.log(`   (Leads with attempts_today > 0 were kept for safety)`);
-    console.log(`\n💡 For cleanest results, run this script when:`);
-    console.log(`   1. After business hours (8 PM EST)`);
-    console.log(`   2. OR stop the orchestrator first: pm2 stop awh-orchestrator`);
+  if (!force && totalBefore > totalAfter && totalRemoved > 0) {
+    const skippedCount = totalBefore - totalAfter - totalRemoved;
+    if (skippedCount > 0) {
+      console.log(`\n⚠️  IMPORTANT: Some invalid leads may still get called today`);
+      console.log(`   (Leads with attempts_today > 0 were kept for safety)`);
+      console.log(`\n💡 To remove ALL invalid leads (including active ones):`);
+      console.log(`   Run with --force flag: npx ts-node scripts/cleanup-invalid-leads.ts --force`);
+      console.log(`   Only use --force when outside business hours or orchestrator is stopped!`);
+    }
   }
   console.log("");
 }
@@ -299,9 +310,10 @@ async function cleanupQueue(dryRun: boolean = false): Promise<void> {
 // Parse command line arguments
 const args = process.argv.slice(2);
 const dryRun = args.includes("--dry-run");
+const force = args.includes("--force");
 
 // Run cleanup
-cleanupQueue(dryRun).catch((error) => {
+cleanupQueue(dryRun, force).catch((error) => {
   console.error("Fatal error:", error);
   process.exit(1);
 });
