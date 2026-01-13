@@ -240,6 +240,7 @@ class BlandService {
       return {
         call_id: response.call_id,
         status: response.status || "success",
+        from_number: selectedFromNumber, // Track which pool number was used
       };
     } catch (error: any) {
       logger.error("Failed to send outbound call to Bland", {

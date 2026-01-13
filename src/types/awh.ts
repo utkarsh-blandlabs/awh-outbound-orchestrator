@@ -98,6 +98,7 @@ export interface BlandOutboundCallRequest {
 export interface BlandOutboundCallResponse {
   call_id: string;
   status: string;
+  from_number?: string; // Which pool number was used for this call
   [key: string]: any;
 }
 

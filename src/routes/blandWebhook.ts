@@ -238,7 +238,9 @@ async function processCallCompletion(
       callState.state,
       transcript.outcome,
       callState.call_id,
-      scheduledCallbackTime
+      scheduledCallbackTime,
+      false, // outbound call
+      callState.from_number // Track which pool number was used
     );
 
     // Add lead to SMS queue for VOICEMAIL or NO_ANSWER outcomes (if enabled)
@@ -560,7 +562,8 @@ async function processInboundCall(
         transcript.outcome,
         callId,
         scheduledCallbackTime,
-        true // isInbound - don't count against daily/monthly limits
+        true, // isInbound - don't count against daily/monthly limits
+        undefined // inbound calls have no from_number (customer called us)
       );
 
       logger.info("Inbound call added to redial queue (not counted against daily/monthly limits)", {

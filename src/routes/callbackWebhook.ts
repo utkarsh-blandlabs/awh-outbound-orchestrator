@@ -181,7 +181,8 @@ async function processCallback(payload: CallbackPayload, requestId: string): Pro
       payload.phone_number,
       payload.first_name,
       payload.last_name,
-      payload.state || ""
+      payload.state || "",
+      blandCallResponse.from_number // Track which pool number was used
     );
 
     logger.info("💾 STATE | Call state stored for webhook matching", {
