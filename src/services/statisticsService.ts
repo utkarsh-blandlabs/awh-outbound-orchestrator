@@ -169,9 +169,69 @@ class StatisticsService {
   }
 
   /**
-   * Record a call completion
+   * Check if a call is actually voicemail (not a real human conversation)
+   * Uses multiple signals to accurately detect voicemails
    */
-  recordCallComplete(outcome: string, answered_by?: string): void {
+  private isActuallyVoicemail(
+    transcript: string,
+    answered_by: string,
+    outcome: string
+  ): boolean {
+    // Priority 1: Explicitly marked as voicemail/no-answer by Bland
+    const answeredByLower = answered_by.toLowerCase();
+    if (
+      answeredByLower === "voicemail" ||
+      answeredByLower === "no-answer" ||
+      answeredByLower === "no_answer"
+    ) {
+      return true;
+    }
+
+    // Priority 2: Check transcript for Ashley's voicemail script
+    // This is the MOST RELIABLE indicator - if Ashley left voicemail message, it's 100% voicemail
+    const voicemailIndicators = [
+      "i'm reaching out because you inquired about health insurance", // Ashley's voicemail script opening
+      "please give me a call back at", // Ashley's voicemail callback request
+      "you've reached the voicemail", // Generic voicemail greeting
+      "please leave a message", // Voicemail prompt
+      "is not available right now", // Common voicemail phrase
+      "cannot take your call", // Common voicemail phrase
+      "press 1 to leave a message", // Voicemail system prompt
+    ];
+
+    const transcriptLower = transcript.toLowerCase();
+    const hasVoicemailScript = voicemailIndicators.some((indicator) =>
+      transcriptLower.includes(indicator)
+    );
+
+    if (hasVoicemailScript) {
+      return true;
+    }
+
+    // Priority 3: Check outcome
+    const outcomeLower = outcome.toLowerCase();
+    if (
+      outcomeLower.includes("voicemail") ||
+      outcomeLower.includes("no_answer") ||
+      outcomeLower.includes("no answer")
+    ) {
+      return true;
+    }
+
+    return false;
+  }
+
+  /**
+   * Record a call completion
+   * @param outcome - Call outcome (e.g., TRANSFERRED, VOICEMAIL, NO_ANSWER)
+   * @param answered_by - Bland's detection (human, voicemail, no-answer, busy)
+   * @param transcript - Full call transcript (used to detect voicemail scripts)
+   */
+  recordCallComplete(
+    outcome: string,
+    answered_by?: string,
+    transcript?: string
+  ): void {
     const today = this.getTodayDate();
     const stats = this.getStatsByDate(today);
 
@@ -181,12 +241,23 @@ class StatisticsService {
     // Categorize by outcome
     const normalizedOutcome = outcome.toLowerCase();
 
+    // CRITICAL FIX: Check if it's actually voicemail before counting as answered
+    // This fixes the bug where voicemails reaching "Identity Confirmation" were counted as answered
+    const isVoicemail = this.isActuallyVoicemail(
+      transcript || "",
+      answered_by || "",
+      outcome
+    );
+
+    // Only count as "answered" if:
+    // 1. NOT a voicemail (verified via transcript + Bland detection)
+    // 2. AND has indicators of human interaction
     if (
-      answered_by === "human" ||
-      normalizedOutcome.includes("transfer") ||
-      normalizedOutcome.includes("sale") ||
-      normalizedOutcome.includes("callback") ||
-      normalizedOutcome.includes("not_interested")
+      !isVoicemail &&
+      (answered_by === "human" ||
+        normalizedOutcome.includes("transfer") ||
+        normalizedOutcome.includes("sale") ||
+        normalizedOutcome.includes("not_interested"))
     ) {
       stats.answered_calls++;
     }
