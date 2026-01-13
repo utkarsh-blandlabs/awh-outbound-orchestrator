@@ -202,7 +202,8 @@ async function processCallCompletion(
     // Record statistics
     statisticsService.recordCallComplete(
       transcript.outcome,
-      transcript.answered_by
+      transcript.answered_by,
+      transcript.transcript // Pass full transcript for voicemail detection
     );
 
     // Record call completion in daily tracker
@@ -520,7 +521,8 @@ async function processInboundCall(
     // Step 5: Record statistics
     statisticsService.recordCallComplete(
       transcript.outcome,
-      transcript.answered_by
+      transcript.answered_by,
+      transcript.transcript // Pass full transcript for voicemail detection
     );
 
     // Step 6: Record call completion in daily tracker
