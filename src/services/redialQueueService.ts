@@ -58,6 +58,10 @@ interface RedialQueueConfig {
   day2_plus_interval_minutes: number; // 2+ days old (gentle)
 }
 
+// Memory leak prevention: Limit array sizes
+const MAX_CALL_HISTORY = 50; // Keep last 50 calls per lead
+const MAX_OUTCOMES = 20; // Keep last 20 outcomes per lead
+
 class RedialQueueService {
   private records: Map<string, RedialRecord> = new Map();
   private queueConfig: RedialQueueConfig;
@@ -860,6 +864,10 @@ class RedialQueueService {
       existing.last_call_timestamp = now;
       existing.last_outcome = outcome;
       existing.outcomes.push(outcome);
+      // Memory leak prevention: Keep only last N outcomes
+      if (existing.outcomes.length > MAX_OUTCOMES) {
+        existing.outcomes = existing.outcomes.slice(-MAX_OUTCOMES);
+      }
       existing.last_call_id = callId;
       existing.updated_at = now;
 
@@ -873,6 +881,10 @@ class RedialQueueService {
         outcome: outcome,
         timestamp: now,
       });
+      // Memory leak prevention: Keep only last N call history entries
+      if (existing.call_history.length > MAX_CALL_HISTORY) {
+        existing.call_history = existing.call_history.slice(-MAX_CALL_HISTORY);
+      }
 
       // Calculate next redial time using progressive intervals
       if (scheduledCallbackTime) {

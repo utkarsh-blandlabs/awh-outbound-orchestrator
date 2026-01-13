@@ -150,4 +150,66 @@ const server = app.listen(PORT, () => {
   console.log("");
 });
 
+// ============================================================================
+// Graceful Shutdown - Prevent Memory Leaks
+// ============================================================================
+
+/**
+ * Cleanup all resources and timers on shutdown
+ * Prevents memory leaks from uncleared intervals/timers
+ */
+function gracefulShutdown(signal: string): void {
+  logger.info(`${signal} received, starting graceful shutdown...`);
+
+  // Close server to stop accepting new connections
+  server.close(() => {
+    logger.info("HTTP server closed");
+  });
+
+  // Stop all background services and timers
+  try {
+    // Import services for cleanup
+    const { redialQueueService } = require("./services/redialQueueService");
+    const { answeringMachineTrackerService } = require("./services/answeringMachineTrackerService");
+
+    // Stop redial queue processor and timers
+    redialQueueService.stopProcessor();
+    logger.info("Redial queue processor stopped");
+
+    // Stop AM tracker flush scheduler
+    answeringMachineTrackerService.stopFlushScheduler();
+    logger.info("AM tracker flush scheduler stopped");
+
+    logger.info("All services stopped successfully");
+  } catch (error: any) {
+    logger.error("Error during service cleanup", { error: error.message });
+  }
+
+  // Give process 5 seconds to cleanup, then force exit
+  setTimeout(() => {
+    logger.warn("Forcing shutdown after timeout");
+    process.exit(0);
+  }, 5000);
+}
+
+// Handle shutdown signals
+process.on("SIGTERM", () => gracefulShutdown("SIGTERM"));
+process.on("SIGINT", () => gracefulShutdown("SIGINT"));
+
+// Handle uncaught errors (but don't exit immediately)
+process.on("uncaughtException", (error: Error) => {
+  logger.error("Uncaught Exception", {
+    error: error.message,
+    stack: error.stack,
+  });
+  // Don't exit - let process manager handle restart
+});
+
+process.on("unhandledRejection", (reason: any) => {
+  logger.error("Unhandled Promise Rejection", {
+    reason: reason?.message || reason,
+  });
+  // Don't exit - let process manager handle restart
+});
+
 export default app;
