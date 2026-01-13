@@ -26,6 +26,14 @@ export const config = {
     from: process.env["BLAND_FROM"] || "",
     transferPhoneNumber: process.env["BLAND_TRANSFER_PHONE_NUMBER"] || "",
 
+    // Phone number pool (for rotating caller IDs to improve pickup rates)
+    fromPool: (process.env["BLAND_FROM_POOL"] || "")
+      .split(",")
+      .map(n => n.trim())
+      .filter(n => n.length > 0),
+    usePool: process.env["BLAND_USE_POOL"] === "true",
+    poolStrategy: (process.env["BLAND_POOL_STRATEGY"] || "round-robin") as "round-robin" | "random",
+
     // Voice and behavior settings
     voiceId: process.env["BLAND_VOICE_ID"] || "",
     maxDuration: parseInt(process.env["BLAND_MAX_DURATION"] || "30"),

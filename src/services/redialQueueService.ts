@@ -11,6 +11,13 @@ import { schedulerService } from "./schedulerService";
 import { convosoService } from "./convosoService";
 import { dailyCallTracker } from "./dailyCallTrackerService";
 
+interface CallHistoryEntry {
+  call_id: string;
+  from_number?: string; // Which pool number was used
+  outcome: string;
+  timestamp: number;
+}
+
 interface RedialRecord {
   lead_id: string;
   phone_number: string;
@@ -31,6 +38,8 @@ interface RedialRecord {
   updated_at: number;
   daily_max_reached_at?: number; // Timestamp when hit daily max
   status: "pending" | "rescheduled" | "completed" | "daily_max_reached" | "paused";
+  call_history?: CallHistoryEntry[]; // Track each call with from_number
+  batch_timestamp?: number; // Track when lead was first added (for batch tracking)
 }
 
 interface RedialQueueConfig {
@@ -48,6 +57,10 @@ interface RedialQueueConfig {
   day1_interval_minutes: number; // Next day (moderate)
   day2_plus_interval_minutes: number; // 2+ days old (gentle)
 }
+
+// Memory leak prevention: Limit array sizes
+const MAX_CALL_HISTORY = 50; // Keep last 50 calls per lead
+const MAX_OUTCOMES = 20; // Keep last 20 outcomes per lead
 
 class RedialQueueService {
   private records: Map<string, RedialRecord> = new Map();
@@ -733,6 +746,7 @@ class RedialQueueService {
    * Called from webhook after call completes
    *
    * @param isInbound - If true, doesn't count against daily limit (customer called us)
+   * @param fromNumber - Which pool number was used for this call (for tracking)
    */
   async addOrUpdateLead(
     leadId: string,
@@ -744,7 +758,8 @@ class RedialQueueService {
     outcome: string,
     callId: string,
     scheduledCallbackTime?: number,
-    isInbound?: boolean
+    isInbound?: boolean,
+    fromNumber?: string
   ): Promise<void> {
     if (!this.queueConfig.enabled) {
       return;
@@ -849,8 +864,27 @@ class RedialQueueService {
       existing.last_call_timestamp = now;
       existing.last_outcome = outcome;
       existing.outcomes.push(outcome);
+      // Memory leak prevention: Keep only last N outcomes
+      if (existing.outcomes.length > MAX_OUTCOMES) {
+        existing.outcomes = existing.outcomes.slice(-MAX_OUTCOMES);
+      }
       existing.last_call_id = callId;
       existing.updated_at = now;
+
+      // Track call history with from_number (pool tracking)
+      if (!existing.call_history) {
+        existing.call_history = [];
+      }
+      existing.call_history.push({
+        call_id: callId,
+        from_number: fromNumber,
+        outcome: outcome,
+        timestamp: now,
+      });
+      // Memory leak prevention: Keep only last N call history entries
+      if (existing.call_history.length > MAX_CALL_HISTORY) {
+        existing.call_history = existing.call_history.slice(-MAX_CALL_HISTORY);
+      }
 
       // Calculate next redial time using progressive intervals
       if (scheduledCallbackTime) {
@@ -938,6 +972,15 @@ class RedialQueueService {
         created_at: now,
         updated_at: now,
         status: scheduledCallbackTime ? "rescheduled" : "pending",
+        call_history: [
+          {
+            call_id: callId,
+            from_number: fromNumber,
+            outcome: outcome,
+            timestamp: now,
+          }
+        ],
+        batch_timestamp: now, // Track when this batch of leads came in
       };
 
       this.records.set(key, newRecord);
@@ -1649,6 +1692,47 @@ class RedialQueueService {
     }
 
     return updated;
+  }
+
+  /**
+   * Get leads by batch (within a time window)
+   * Useful for tracking leads that came in together
+   *
+   * @param windowMinutes - Time window in minutes to group leads (default: 5)
+   * @returns Array of batches, each containing leads that arrived within the window
+   */
+  getLeadsByBatch(windowMinutes: number = 5): Array<{ batch_time: Date; count: number; leads: RedialRecord[] }> {
+    const windowMs = windowMinutes * 60 * 1000;
+    const batches: Map<number, RedialRecord[]> = new Map();
+
+    // Group leads by batch timestamp (rounded to window)
+    for (const record of this.records.values()) {
+      if (record.batch_timestamp) {
+        // Round to nearest window
+        const batchKey = Math.floor(record.batch_timestamp / windowMs) * windowMs;
+
+        if (!batches.has(batchKey)) {
+          batches.set(batchKey, []);
+        }
+        batches.get(batchKey)!.push(record);
+      }
+    }
+
+    // Convert to array and sort by time (newest first)
+    return Array.from(batches.entries())
+      .map(([timestamp, leads]) => ({
+        batch_time: new Date(timestamp),
+        count: leads.length,
+        leads: leads.sort((a, b) => b.created_at - a.created_at),
+      }))
+      .sort((a, b) => b.batch_time.getTime() - a.batch_time.getTime());
+  }
+
+  /**
+   * Get recent batches (last N batches)
+   */
+  getRecentBatches(limit: number = 10, windowMinutes: number = 5): Array<{ batch_time: Date; count: number; leads: RedialRecord[] }> {
+    return this.getLeadsByBatch(windowMinutes).slice(0, limit);
   }
 
   /**

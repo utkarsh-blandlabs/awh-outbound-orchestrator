@@ -18,6 +18,7 @@ import {
 
 class BlandService {
   private client: AxiosInstance;
+  private poolIndex: number = 0; // For round-robin selection
 
   constructor() {
     this.client = axios.create({
@@ -31,6 +32,31 @@ class BlandService {
   }
 
   /**
+   * Select a phone number from the pool (if enabled)
+   * Supports both round-robin and random selection strategies
+   */
+  private selectFromNumber(): string {
+    // If pool is not enabled or empty, use single number
+    if (!config.bland.usePool || config.bland.fromPool.length === 0) {
+      return config.bland.from;
+    }
+
+    const pool = config.bland.fromPool;
+    const strategy = config.bland.poolStrategy;
+
+    if (strategy === "random") {
+      // Random selection
+      const randomIndex = Math.floor(Math.random() * pool.length);
+      return pool[randomIndex] || config.bland.from;
+    } else {
+      // Round-robin selection (default)
+      const selectedNumber = pool[this.poolIndex] || config.bland.from;
+      this.poolIndex = (this.poolIndex + 1) % pool.length;
+      return selectedNumber;
+    }
+  }
+
+  /**
    * Send an outbound call via Bland
    * Real Bland API: POST /v1/calls
    */
@@ -41,6 +67,9 @@ class BlandService {
     leadId?: string;
     listId?: string;
   }): Promise<BlandOutboundCallResponse> {
+    // Select phone number from pool (or use single number if pool disabled)
+    const selectedFromNumber = this.selectFromNumber();
+
     // Wait for rate limit slot before proceeding
     // This enforces:
     // 1. Global limit: Max 5 calls/sec (Enterprise: 5.5/sec)
@@ -57,6 +86,9 @@ class BlandService {
     logger.info("Sending outbound call to Bland", {
       phone: payload.phoneNumber,
       name: `${payload.firstName} ${payload.lastName}`,
+      from_number: selectedFromNumber, // Log which number is being used
+      pool_enabled: config.bland.usePool,
+      pool_strategy: config.bland.poolStrategy,
     });
 
     // IMPORTANT: Build request_data (parameters) for Bland pathway to access
@@ -148,7 +180,7 @@ class BlandService {
       request_data: requestData,
 
       // Phone numbers
-      ...(config.bland.from && { from: config.bland.from }),
+      ...(selectedFromNumber && { from: selectedFromNumber }),
       ...(config.bland.transferPhoneNumber && {
         transfer_phone_number: config.bland.transferPhoneNumber,
       }),
@@ -208,6 +240,7 @@ class BlandService {
       return {
         call_id: response.call_id,
         status: response.status || "success",
+        from_number: selectedFromNumber, // Track which pool number was used
       };
     } catch (error: any) {
       logger.error("Failed to send outbound call to Bland", {

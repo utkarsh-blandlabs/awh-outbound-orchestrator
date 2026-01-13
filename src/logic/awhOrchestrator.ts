@@ -193,7 +193,8 @@ export async function handleAwhOutbound(
       payload.phone_number,
       payload.first_name,
       payload.last_name,
-      payload.state
+      payload.state,
+      callResponse.from_number // Track which pool number was used
     );
     currentStage = OrchestrationStage.WEBHOOK_REGISTERED;
 

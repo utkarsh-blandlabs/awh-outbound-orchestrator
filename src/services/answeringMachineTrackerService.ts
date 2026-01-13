@@ -37,6 +37,7 @@ class AnsweringMachineTrackerService {
   private trackerConfig: AMTrackerConfig;
   private dataDir: string;
   private currentDate: string;
+  private flushInterval: NodeJS.Timeout | null = null; // Store interval ID for cleanup
 
   constructor() {
     this.dataDir = path.join(process.cwd(), "data", "am-tracker");
@@ -330,8 +331,13 @@ class AnsweringMachineTrackerService {
    * Supports decimal hours (e.g., 20.5 = 8:30 PM)
    */
   private scheduleFlush(): void {
+    // Clear existing interval if any (prevents duplicate intervals on restart)
+    if (this.flushInterval) {
+      clearInterval(this.flushInterval);
+    }
+
     // Check every 30 minutes if it's time to flush
-    setInterval(() => {
+    this.flushInterval = setInterval(() => {
       const now = new Date();
       const estOffset = -5 * 60;
       const utc = now.getTime() + now.getTimezoneOffset() * 60000;
@@ -352,6 +358,17 @@ class AnsweringMachineTrackerService {
         this.flushOldRecords();
       }
     }, 30 * 60 * 1000); // Check every 30 minutes
+  }
+
+  /**
+   * Stop the flush interval (for cleanup on shutdown)
+   */
+  stopFlushScheduler(): void {
+    if (this.flushInterval) {
+      clearInterval(this.flushInterval);
+      this.flushInterval = null;
+      logger.info("AM tracker flush scheduler stopped");
+    }
   }
 
   /**

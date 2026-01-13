@@ -15,6 +15,7 @@ interface PendingCall {
   created_at: number;
   status: "pending" | "completed" | "failed";
   error?: string;
+  from_number?: string; // Track which pool number was used for this call
 }
 
 class CallStateManagerClass {
@@ -115,7 +116,8 @@ class CallStateManagerClass {
     phoneNumber: string,
     firstName: string,
     lastName: string,
-    state: string
+    state: string,
+    fromNumber?: string // Track which pool number was used
   ): void {
     const pendingCall: PendingCall = {
       call_id: callId,
@@ -128,6 +130,7 @@ class CallStateManagerClass {
       state: state,
       created_at: Date.now(),
       status: "pending",
+      from_number: fromNumber,
     };
 
     this.pendingCalls.set(callId, pendingCall);
@@ -136,6 +139,7 @@ class CallStateManagerClass {
       call_id: callId,
       lead_id: leadId,
       list_id: listId,
+      from_number: fromNumber,
       pending_count: this.pendingCalls.size,
     });
 
