@@ -1,687 +1,787 @@
 # AWH Outbound Orchestrator - API Documentation
 
-Complete API reference for all available endpoints.
+**Version**: 1.0.0
+**Last Updated**: January 13, 2026
+**Total Endpoints**: 80+
 
 ---
+
+## Quick Reference
+
+### Webhook Endpoints (No Auth Required)
+- `POST /webhooks/awhealth-outbound` - Main call trigger from Convoso
+- `POST /webhooks/bland-callback` - Call completion from Bland AI
+- `POST /webhooks/call-back` - Callback requests (Zapier replacement)
+- `POST /webhooks/sms-reply` - SMS replies from customers
+- `POST /webhooks/pathway/update-zip` - Real-time zip code updates
+- `POST /webhooks/pathway/update-lead-data` - Real-time lead data updates
+
+### Admin API (Auth Required)
+- Base path: `/api/admin`
+- Authentication: `x-api-key` header or `api_key` query parameter
+- 75+ management endpoints
+
+---
+
 ## Table of Contents
 
-1. [Public Endpoints](#public-endpoints)
-2. [Webhook Endpoints](#webhook-endpoints)
-3. [Admin API Endpoints](#admin-api-endpoints)
-4. [Authentication](#authentication)
----
-
-## Public Endpoints
-
-### Health Check
-
-Check if the service is running and healthy.
-
-**Endpoint:** `GET /health`
-
-**Authentication:** None
-
-**Response:**
-```json
-{
-  "status": "ok",
-  "service": "awh-outbound-orchestrator",
-  "timestamp": "2025-12-12T10:30:00.000Z",
-  "architecture": "async"
-}
-```
-
-**Example:**
-```bash
-curl http://localhost:3000/health
-```
+1. [Webhook Endpoints](#webhook-endpoints)
+2. [Admin API - System Management](#admin-api---system-management)
+3. [Admin API - Calls Management](#admin-api---calls-management)
+4. [Admin API - Statistics](#admin-api---statistics)
+5. [Admin API - Queue Management](#admin-api---queue-management)
+6. [Admin API - Blocklist](#admin-api---blocklist)
+7. [Admin API - Reports](#admin-api---reports)
+8. [Authentication](#authentication)
+9. [Error Handling](#error-handling)
 
 ---
 
 ## Webhook Endpoints
 
-### 1. Convoso Webhook (Initiate Outbound Call)
+### 1. AWHealth Outbound Webhook
 
-Receives webhooks from Convoso when a lead fills out a web form. Initiates a Bland AI outbound call.
+```
+POST /webhooks/awhealth-outbound
+```
 
-**Endpoint:** `POST /webhooks/awhealth-outbound`
+**Purpose**: Main webhook to receive outbound call triggers from Convoso
+**Authentication**: None
+**When to call**: Triggered automatically by Convoso when a lead needs to be called
 
-**Authentication:** None (webhook from Convoso)
-
-**Request Body:**
+**Request Body**:
 ```json
 {
-  "first_name": "John",
-  "last_name": "Doe",
-  "phone_number": "5551234567",
-  "state": "CA",
-  "lead_id": "12345",
-  "list_id": "16529",
-  "email": "john@example.com",
-  "address1": "123 Main St",
-  "city": "Los Angeles",
-  "postal_code": "90001",
-  "date_of_birth": "1980-01-15",
-  "age": "44"
+  "phone_number": "5551234567",      // Required
+  "lead_id": "12345",                 // Required
+  "list_id": "789",                   // Required
+  "first_name": "John",               // Optional
+  "last_name": "Doe",                 // Optional
+  "state": "CA",                      // Optional
+  "email": "john@example.com",        // Optional
+  "postal_code": "90001"              // Optional
 }
 ```
 
-**Required Fields:**
-- `phone_number` (string) - Lead's phone number
-- `lead_id` (string) - Convoso lead ID
-- `list_id` (string) - Convoso list ID (dynamic per lead)
-
-**Optional Fields:**
-- `first_name` (string) - Default: "Unknown"
-- `last_name` (string) - Default: "Lead"
-- `state` (string)
-- `email` (string)
-- `address1` (string)
-- `city` (string)
-- `postal_code` (string)
-- `date_of_birth` (string)
-- `age` (string)
-
-**Response (202 Accepted):**
+**Success Response** (202 Accepted):
 ```json
 {
   "success": true,
   "message": "Webhook received, processing in background",
-  "request_id": "req_1702345678_abc123"
+  "request_id": "req_1234567890_abc123"
 }
 ```
 
-**Error Response (400 Bad Request):**
+**What happens**:
+1. ✅ Validates required fields
+2. ✅ Checks blocklist
+3. ✅ Applies 2-minute rate limit per number
+4. ✅ Initiates Bland AI call
+5. ✅ Stores call state
+6. ✅ Returns immediately (async processing)
+
+---
+
+### 2. Bland AI Callback Webhook
+
+```
+POST /webhooks/bland-callback
+```
+
+**Purpose**: Receives call completion callbacks from Bland AI
+**Authentication**: None
+**When to call**: Triggered automatically by Bland AI when call completes
+
+**Request Body** (from Bland AI):
 ```json
 {
-  "success": false,
-  "error": "Invalid payload: phone_number is required, lead_id is required, list_id is required",
-  "request_id": "req_1702345678_abc123"
+  "call_id": "call_xyz",
+  "status": "completed",
+  "answered_by": "human",
+  "to": "5551234567",
+  "concatenated_transcript": "...",
+  "pathway_tags": ["interested", "callback"],
+  "transferred_to": "5555551234",
+  "call_length": 120
 }
 ```
 
-**Example:**
-```bash
-curl -X POST http://localhost:3000/webhooks/awhealth-outbound \
-  -H "Content-Type: application/json" \
-  -d '{
-    "first_name": "John",
-    "last_name": "Doe",
-    "phone_number": "5551234567",
+**What happens**:
+1. ✅ Matches call with stored state
+2. ✅ Updates Convoso with outcome
+3. ✅ Records statistics
+4. ✅ Manages redial queue
+5. ✅ Detects STOP/DNC requests
+6. ✅ Blocks failed numbers for 24h
+7. ✅ Adds voicemail/no-answer to SMS queue
+
+**Call Outcomes**:
+- `human` → Update Convoso, record stats
+- `transferred` → Mark as transferred
+- `voicemail` → Add to redial + SMS queue
+- `no_answer` → Add to redial queue
+- `busy/failed` → Block for 24h + add to redial
+- `DNC/STOP` → Add to blocklist, stop all contact
+
+---
+
+### 3. Callback Request Webhook
+
+```
+POST /webhooks/call-back
+```
+
+**Purpose**: Zapier replacement - receives callback triggers from Convoso
+**Authentication**: None
+**When to call**: Triggered when customer requests callback
+
+**Request Body**:
+```json
+{
+  "phone_number": "5551234567",      // Required
+  "first_name": "John",               // Required
+  "last_name": "Doe",                 // Required
+  "lead_id": "12345",                 // Required
+  "list_id": "789",                   // Optional
+  "status": "CALLBACK"
+}
+```
+
+**What happens**:
+1. ✅ Validates required fields
+2. ✅ Initiates Bland AI call immediately
+3. ✅ Stores call state for webhook matching
+4. ✅ Waits for bland-callback to complete flow
+
+---
+
+### 4. SMS Reply Webhook
+
+```
+POST /webhooks/sms-reply
+```
+
+**Purpose**: Handles incoming SMS replies from customers
+**Authentication**: None
+**When to call**: Triggered by Bland AI when customer replies to SMS
+
+**Request Body**:
+```json
+{
+  "from": "5551234567",              // Required - Customer phone
+  "to": "5559876543",                // Required - Our number
+  "body": "Yes, please call me back" // Required - SMS content
+}
+```
+
+**Reply Types**:
+- **POSITIVE** - Wants callback: `YES, CALL ME, INTERESTED, CALLBACK`
+- **NEGATIVE** - Not interested: `NO, NOT INTERESTED`
+- **OPT_OUT** - Stop contact: `STOP, UNSUBSCRIBE, DNC, CANCEL`
+- **UNKNOWN** - Doesn't match any pattern
+
+**What happens**:
+
+**For OPT_OUT (STOP, DNC)**:
+1. ✅ Adds to blocklist immediately
+2. ✅ Removes from SMS queue
+3. ✅ Updates Convoso status to "DNC"
+4. ✅ Removes from redial queue
+5. ✅ TCPA-compliant processing
+
+**For POSITIVE (YES, CALL ME)**:
+1. ✅ Schedules callback via Convoso
+2. ✅ Initiates Bland AI call
+
+---
+
+### 5. Pathway Real-time Update Webhooks
+
+#### Update Zip Code
+
+```
+POST /webhooks/pathway/update-zip
+```
+
+**Purpose**: Updates lead's zip code in Convoso DURING active call
+**Authentication**: None
+**When to call**: Called by Bland AI pathway when Ashley collects zip code
+
+**Request Body**:
+```json
+{
+  "phone_number": "5551234567",      // Required
+  "lead_id": "12345",                 // Required
+  "list_id": "789",                   // Required
+  "zip_code": "90001"                 // Required - 5 digits
+}
+```
+
+**Success Response** (200 OK):
+```json
+{
+  "success": true,
+  "message": "Zip code updated successfully in Convoso",
+  "lead_id": "12345",
+  "zip_code": "90001",
+  "updated_at": "2026-01-13T10:30:00Z"
+}
+```
+
+**What happens**:
+1. ✅ Validates zip code format (5 digits)
+2. ✅ Updates Convoso immediately (<500ms)
+3. ✅ Live agent sees correct zip when call transfers
+
+**Use Case**: Solves problem where live agents see wrong/old zip codes because updates happen after call ends.
+
+---
+
+#### Update Lead Data (Generic)
+
+```
+POST /webhooks/pathway/update-lead-data
+```
+
+**Purpose**: Update any lead data during pathway execution
+**Authentication**: None
+**When to call**: Called by Bland AI pathway when collecting lead info
+
+**Request Body**:
+```json
+{
+  "phone_number": "5551234567",
+  "lead_id": "12345",
+  "list_id": "789",
+  "data": {
+    "postal_code": "90001",
     "state": "CA",
-    "lead_id": "12345",
-    "list_id": "16529"
-  }'
-```
-
----
-
-### 2. Bland Webhook (Call Completion)
-
-Receives webhooks from Bland AI when an outbound call completes. Updates Convoso with call results.
-
-**Endpoint:** `POST /webhooks/bland-callback`
-
-**Authentication:** None (webhook from Bland AI)
-
-**Request Body:**
-Bland sends their standard webhook payload with call results, transcript, and variables.
-
-**Response (200 OK):**
-```json
-{
-  "success": true,
-  "message": "Webhook received",
-  "requestId": "bland_1702345678_xyz789"
+    "plan_type": "Medicare Advantage",
+    "age": "65"
+  }
 }
 ```
 
-**Example:**
-This endpoint is called automatically by Bland AI. Configure in Bland dashboard:
-```
-Webhook URL: https://your-domain.com/webhooks/bland-callback
-```
-
----
-
-### 3. Callback Webhook (Zapier Replacement)
-
-Alternative webhook endpoint for triggering callbacks.
-
-**Endpoint:** `POST /webhooks/call-back`
-
-**Authentication:** None
-
-**Details:** See [callbackWebhook.ts](src/routes/callbackWebhook.ts) for implementation.
-
----
-
-## Admin API Endpoints
-
-All admin endpoints require authentication via API key.
-
-### Authentication
-
-**Method 1: Header**
-```bash
-curl -H "X-API-Key: your-admin-api-key" \
-  http://localhost:3000/api/admin/health
-```
-
-**Method 2: Query Parameter**
-```bash
-curl "http://localhost:3000/api/admin/health?api_key=your-admin-api-key"
-```
-
-**Setup:**
-Set the `ADMIN_API_KEY` environment variable in your `.env` file:
-```bash
-ADMIN_API_KEY=awh_admin_2024_secure_key_change_in_production
-```
-
----
-
-### Admin - System Health
-
-Get comprehensive system health status including memory, uptime, and rate limits.
-
-**Endpoint:** `GET /api/admin/health`
-
-**Authentication:** Required (API Key)
-
-**Response:**
+**Success Response** (200 OK):
 ```json
 {
   "success": true,
-  "timestamp": "2025-12-12T10:30:00.000Z",
+  "fields_updated": ["postal_code", "state", "plan_type"],
+  "updated_at": "2026-01-13T10:30:00Z"
+}
+```
+
+---
+
+## Admin API - System Management
+
+**Base Path**: `/api/admin`
+**Authentication**: Required (see [Authentication](#authentication))
+
+### Get System Configuration
+
+```
+GET /api/admin/config
+```
+
+**Purpose**: Get system configuration (excluding sensitive data)
+**When to call**: Check current system settings
+
+**Response**:
+```json
+{
+  "server": { "port": 3000, "nodeEnv": "production" },
+  "bland": { "pathwayId": "...", "voiceId": "..." },
+  "convoso": { "apiUrl": "...", "campaignId": "..." },
+  "retry": { "maxRetries": 3, "retryDelay": 1000 },
+  "rateLimit": { "enabled": true, "intervalMinutes": 2 }
+}
+```
+
+---
+
+### Get System Health
+
+```
+GET /api/admin/health
+```
+
+**Purpose**: Comprehensive system health check
+**When to call**: Monitor system status, troubleshoot issues
+
+**Response**:
+```json
+{
   "status": "healthy",
-  "uptime_seconds": 86400,
-  "uptime_formatted": "24h 0m",
+  "uptime": 86400,
   "memory": {
-    "rss_mb": 125.45,
-    "heap_used_mb": 89.32,
-    "heap_total_mb": 120.5
+    "used": "150 MB",
+    "percentUsed": "1.83%"
   },
-  "calls": {
-    "total": 150,
-    "pending": 5,
-    "completed": 140,
-    "failed": 5
+  "activeCalls": {
+    "total": 45,
+    "pending": 3
   },
-  "rate_limit": {
-    "current_rate": "3/5 calls/sec",
-    "utilization": "60%",
-    "unique_numbers": 142,
-    "config": {
-      "enabled": true,
-      "maxCallsPerSecond": 5,
-      "sameNumberIntervalMs": 10000
-    }
-  },
-  "node_version": "v20.10.0",
-  "platform": "linux"
+  "services": {
+    "queueProcessor": "running",
+    "smsScheduler": "running"
+  }
 }
-```
-
-**Example:**
-```bash
-curl -H "X-API-Key: your-api-key" \
-  http://localhost:3000/api/admin/health
 ```
 
 ---
 
-### Admin - Active Calls
+## Admin API - Calls Management
 
-Get all currently active/pending calls.
+### Get All Active Calls
 
-**Endpoint:** `GET /api/admin/calls/active`
+```
+GET /api/admin/calls/active
+```
 
-**Authentication:** Required (API Key)
+**Purpose**: Get all active/pending calls
+**When to call**: Monitor current call volume
 
-**Response:**
+**Response**:
 ```json
 {
-  "success": true,
-  "timestamp": "2025-12-12T10:30:00.000Z",
   "count": 3,
   "calls": [
     {
-      "call_id": "bland_abc123",
-      "request_id": "req_1702345678_abc123",
-      "lead_id": "12345",
-      "phone_number": "+15551234567",
-      "first_name": "John",
-      "last_name": "Doe",
-      "created_at": 1702345678000,
+      "call_id": "call_xyz",
+      "phone_number": "5551234567",
       "status": "pending",
-      "error": null,
-      "duration_ms": 45000,
-      "age_minutes": 0.75,
-      "created_at_iso": "2025-12-12T10:27:58.000Z",
-      "customer_name": "John Doe",
+      "duration_seconds": 300,
       "is_stale": false
     }
   ]
 }
 ```
 
-**Example:**
-```bash
-curl -H "X-API-Key: your-api-key" \
-  http://localhost:3000/api/admin/calls/active
+---
+
+### Get Call Statistics
+
 ```
+GET /api/admin/calls/stats
+```
+
+**Purpose**: Get call cache statistics
+**Response**: Total, pending, completed, failed counts + memory metrics
 
 ---
 
-### Admin - Call Statistics
+### Get Specific Call
 
-Get statistics about calls in the cache.
+```
+GET /api/admin/calls/:call_id
+```
 
-**Endpoint:** `GET /api/admin/calls/stats`
+**Purpose**: Get details for specific call
+**When to call**: Troubleshoot specific call
 
-**Authentication:** Required (API Key)
+---
 
-**Response:**
+### Delete Specific Call
+
+```
+DELETE /api/admin/calls/:call_id
+```
+
+**Purpose**: Manually remove call from cache
+**When to call**: Clean up stuck calls
+
+---
+
+### Clear Completed Calls Cache
+
+```
+POST /api/admin/cache/clear
+```
+
+**Purpose**: Clear all completed calls from cache
+**When to call**: Free memory, clean up old calls
+
+**Response**:
 ```json
 {
   "success": true,
-  "timestamp": "2025-12-12T10:30:00.000Z",
   "stats": {
-    "total": 150,
-    "pending": 5,
-    "completed": 140,
-    "failed": 5,
-    "cache_size_mb": 89.32,
-    "memory_usage": {
-      "rss_mb": 125.45,
-      "heap_used_mb": 89.32,
-      "heap_total_mb": 120.5
-    }
+    "before": { "total": 150 },
+    "after": { "total": 10 },
+    "cleared": 140
   }
 }
 ```
 
-**Example:**
-```bash
-curl -H "X-API-Key: your-api-key" \
-  http://localhost:3000/api/admin/calls/stats
+---
+
+### Get Call History for Phone
+
+```
+GET /api/admin/calls/history/:phoneNumber
+```
+
+**Purpose**: Get call history for specific phone
+**When to call**: Investigate call patterns
+
+---
+
+### Get Today's Calls
+
+```
+GET /api/admin/calls/today
+```
+
+**Purpose**: Get all calls made today
+**When to call**: Daily reporting
+
+---
+
+### Block/Unblock Phone Number
+
+```
+POST /api/admin/calls/block
+POST /api/admin/calls/unblock
+```
+
+**Purpose**: Manually block/unblock phone number
+**Request Body**:
+```json
+{
+  "phone_number": "5551234567",
+  "reason": "Customer requested DNC"
+}
 ```
 
 ---
 
-### Admin - Get Specific Call
+### Get/Update Call Protection Config
 
-Get details for a specific call by call_id.
-
-**Endpoint:** `GET /api/admin/calls/:call_id`
-
-**Authentication:** Required (API Key)
-
-**Path Parameters:**
-- `call_id` (string) - Bland call ID
-
-**Response:**
-```json
-{
-  "success": true,
-  "timestamp": "2025-12-12T10:30:00.000Z",
-  "call": {
-    "call_id": "bland_abc123",
-    "request_id": "req_1702345678_abc123",
-    "lead_id": "12345",
-    "list_id": "16529",
-    "phone_number": "+15551234567",
-    "first_name": "John",
-    "last_name": "Doe",
-    "created_at": 1702345678000,
-    "status": "completed",
-    "error": null,
-    "duration_ms": 120000,
-    "age_minutes": 2.0,
-    "created_at_iso": "2025-12-12T10:28:00.000Z",
-    "customer_name": "John Doe",
-    "is_stale": false
-  }
-}
+```
+GET  /api/admin/calls/protection/config
+PUT  /api/admin/calls/protection/config
 ```
 
-**Error Response (404):**
-```json
-{
-  "success": false,
-  "error": "Call not found",
-  "call_id": "bland_xyz789"
-}
-```
-
-**Example:**
-```bash
-curl -H "X-API-Key: your-api-key" \
-  http://localhost:3000/api/admin/calls/bland_abc123
-```
+**Purpose**: Manage rate limiting and call protection
+**Settings**: intervalMinutes, maxAttemptsPerDay
 
 ---
 
-### Admin - Clear Cache
+## Admin API - Statistics
 
-Manually trigger cleanup of old calls from cache.
+### Get Today's Statistics
 
-**Endpoint:** `POST /api/admin/cache/clear`
+```
+GET /api/admin/statistics/today
+```
 
-**Authentication:** Required (API Key)
-
-**Response:**
+**Response**:
 ```json
 {
-  "success": true,
-  "message": "Cache cleared successfully",
-  "before": {
-    "total": 150,
-    "pending": 5,
-    "completed": 140,
-    "failed": 5
-  },
-  "after": {
-    "total": 10,
-    "pending": 5,
-    "completed": 5,
-    "failed": 0
-  },
-  "cleared": 140
-}
-```
-
-**Example:**
-```bash
-curl -X POST \
-  -H "X-API-Key: your-api-key" \
-  http://localhost:3000/api/admin/cache/clear
-```
-
----
-
-### Admin - Delete Specific Call
-
-Manually remove a specific call from cache.
-
-**Endpoint:** `DELETE /api/admin/calls/:call_id`
-
-**Authentication:** Required (API Key)
-
-**Path Parameters:**
-- `call_id` (string) - Bland call ID to remove
-
-**Response:**
-```json
-{
-  "success": true,
-  "message": "Call removed from cache",
-  "call_id": "bland_abc123"
-}
-```
-
-**Error Response (404):**
-```json
-{
-  "success": false,
-  "error": "Call not found",
-  "call_id": "bland_xyz789"
-}
-```
-
-**Example:**
-```bash
-curl -X DELETE \
-  -H "X-API-Key: your-api-key" \
-  http://localhost:3000/api/admin/calls/bland_abc123
-```
-
----
-
-### Admin - Statistics: Today
-
-Get call statistics for today.
-
-**Endpoint:** `GET /api/admin/statistics/today`
-
-**Authentication:** Required (API Key)
-
-**Response:**
-```json
-{
-  "success": true,
-  "timestamp": "2025-12-12T10:30:00.000Z",
+  "date": "2026-01-13",
   "statistics": {
-    "date": "2025-12-12",
-    "total_calls": 150,
-    "completed_calls": 140,
-    "failed_calls": 10,
-    "answered_calls": 120,
-    "transferred_calls": 45,
-    "voicemail_calls": 30,
-    "no_answer_calls": 20,
-    "busy_calls": 5,
-    "not_interested_calls": 25,
-    "callback_requested_calls": 10,
-    "connectivity_rate": 80.0,
-    "transfer_rate": 37.5,
-    "success_rate": 93.33
+    "total_calls": 250,
+    "human_answered": 100,
+    "voicemail": 80,
+    "transferred": 50,
+    "dnc_requests": 5
   }
 }
 ```
 
-**Example:**
-```bash
-curl -H "X-API-Key: your-api-key" \
-  http://localhost:3000/api/admin/statistics/today
+---
+
+### Get Statistics for Date
+
 ```
+GET /api/admin/statistics/date/:date
+```
+
+**Parameters**: `date` - Format: YYYY-MM-DD
 
 ---
 
-### Admin - Statistics: By Date
+### Get Statistics for Date Range
 
-Get call statistics for a specific date.
+```
+GET /api/admin/statistics/range?start_date=YYYY-MM-DD&end_date=YYYY-MM-DD
+```
 
-**Endpoint:** `GET /api/admin/statistics/date/:date`
+**Purpose**: Weekly/monthly reporting
 
-**Authentication:** Required (API Key)
+---
 
-**Path Parameters:**
-- `date` (string) - Date in YYYY-MM-DD format (e.g., "2025-12-12")
+### Get All-Time Statistics
 
-**Response:**
+```
+GET /api/admin/statistics/all-time
+```
+
+**Purpose**: System-wide reporting
+
+---
+
+## Admin API - Queue Management
+
+### Scheduler Endpoints
+
+```
+GET  /api/admin/scheduler/config
+PUT  /api/admin/scheduler/config
+GET  /api/admin/scheduler/queue
+POST /api/admin/scheduler/queue/process
+DELETE /api/admin/scheduler/queue
+```
+
+**Purpose**: Manage callback scheduling and business hours
+
+---
+
+### Redial Queue Endpoints
+
+#### Get Redial Queue Status
+
+```
+GET /api/admin/redial-queue/status
+```
+
+**Response**:
 ```json
 {
-  "success": true,
-  "timestamp": "2025-12-12T10:30:00.000Z",
-  "date": "2025-12-10",
-  "statistics": {
-    "date": "2025-12-10",
-    "total_calls": 200,
-    "completed_calls": 190,
-    "failed_calls": 10,
-    "answered_calls": 160,
-    "transferred_calls": 60,
-    "voicemail_calls": 40,
-    "no_answer_calls": 30,
-    "busy_calls": 8,
-    "not_interested_calls": 30,
-    "callback_requested_calls": 12,
-    "connectivity_rate": 80.0,
-    "transfer_rate": 37.5,
-    "success_rate": 95.0
+  "status": {
+    "enabled": true,
+    "running": true
+  },
+  "stats": {
+    "totalLeads": 1942,
+    "readyToDial": 150,
+    "pending": 50
+  },
+  "config": {
+    "maxDailyAttempts": 8,
+    "retentionDays": 30
   }
 }
 ```
 
-**Error Response (400):**
-```json
-{
-  "success": false,
-  "error": "Invalid date format. Use YYYY-MM-DD"
-}
+---
+
+#### Get/Update Redial Queue Config
+
+```
+GET /api/admin/redial-queue/config
+PUT /api/admin/redial-queue/config
 ```
 
-**Example:**
-```bash
-curl -H "X-API-Key: your-api-key" \
-  http://localhost:3000/api/admin/statistics/date/2025-12-10
+**Settings**: maxDailyAttempts, retentionDays, processingIntervalMinutes
+
+---
+
+#### Get Redial Queue Records
+
+```
+GET /api/admin/redial-queue/records?status=pending&ready=true&limit=100
+```
+
+**Query Parameters**:
+- `status` - Filter by status
+- `ready` - Filter by ready to dial
+- `limit` - Max records (default: 100)
+- `offset` - Pagination offset
+
+---
+
+#### Control Redial Queue
+
+```
+POST /api/admin/redial-queue/start
+POST /api/admin/redial-queue/stop
+POST /api/admin/redial-queue/process
+POST /api/admin/redial-queue/enable
+POST /api/admin/redial-queue/disable
 ```
 
 ---
 
-### Admin - Statistics: Date Range
+#### Manage Individual Leads
 
-Get call statistics for a date range.
+```
+DELETE /api/admin/redial-queue/lead/:lead_id?phone=xxx
+POST   /api/admin/redial-queue/lead/:lead_id/pause?phone=xxx
+POST   /api/admin/redial-queue/lead/:lead_id/resume?phone=xxx
+```
 
-**Endpoint:** `GET /api/admin/statistics/range`
+**Purpose**: Remove, pause, or resume specific leads
 
-**Authentication:** Required (API Key)
+---
 
-**Query Parameters:**
-- `start_date` (string, required) - Start date in YYYY-MM-DD format
-- `end_date` (string, required) - End date in YYYY-MM-DD format
+#### Cleanup Old Files
 
-**Response:**
+```
+POST /api/admin/redial-queue/cleanup
+```
+
+**Purpose**: Remove old files beyond retention period
+
+---
+
+### Queue Processor Endpoints
+
+```
+GET  /api/admin/queue-processor/status
+POST /api/admin/queue-processor/process
+GET  /api/admin/queue-processor/config
+PUT  /api/admin/queue-processor/config
+POST /api/admin/queue-processor/start
+POST /api/admin/queue-processor/stop
+POST /api/admin/queue-processor/enable
+POST /api/admin/queue-processor/disable
+```
+
+---
+
+## Admin API - Blocklist
+
+### Get Blocklist
+
+```
+GET /api/admin/blocklist
+```
+
+**Response**:
 ```json
 {
-  "success": true,
-  "timestamp": "2025-12-12T10:30:00.000Z",
-  "start_date": "2025-12-01",
-  "end_date": "2025-12-10",
-  "days": 10,
-  "statistics": [
+  "enabled": true,
+  "count": 50,
+  "flags": [
     {
-      "date": "2025-12-01",
-      "total_calls": 150,
-      "completed_calls": 145,
-      "failed_calls": 5,
-      "answered_calls": 120,
-      "transferred_calls": 45,
-      "voicemail_calls": 25,
-      "no_answer_calls": 20,
-      "busy_calls": 5,
-      "not_interested_calls": 20,
-      "callback_requested_calls": 8,
-      "connectivity_rate": 80.0,
-      "transfer_rate": 37.5,
-      "success_rate": 96.67
+      "field": "phone_number",
+      "value": "5551234567",
+      "reason": "Customer requested DNC"
     }
-    // ... more days
   ]
 }
 ```
 
-**Error Response (400):**
-```json
-{
-  "success": false,
-  "error": "Missing required parameters: start_date and end_date"
-}
+---
+
+### Add/Remove from Blocklist
+
+```
+POST   /api/admin/blocklist
+DELETE /api/admin/blocklist/:flagId
 ```
 
-**Example:**
-```bash
-curl -H "X-API-Key: your-api-key" \
-  "http://localhost:3000/api/admin/statistics/range?start_date=2025-12-01&end_date=2025-12-10"
+**Add Request Body**:
+```json
+{
+  "field": "phone_number",
+  "value": "5551234567",
+  "reason": "DNC request"
+}
 ```
 
 ---
 
-### Admin - Statistics: All-Time
+### Enable/Disable Blocklist
 
-Get aggregated statistics across all dates.
-
-**Endpoint:** `GET /api/admin/statistics/all-time`
-
-**Authentication:** Required (API Key)
-
-**Response:**
-```json
-{
-  "success": true,
-  "timestamp": "2025-12-12T10:30:00.000Z",
-  "statistics": {
-    "date": "all-time",
-    "total_calls": 5000,
-    "completed_calls": 4800,
-    "failed_calls": 200,
-    "answered_calls": 4000,
-    "transferred_calls": 1500,
-    "voicemail_calls": 800,
-    "no_answer_calls": 600,
-    "busy_calls": 150,
-    "not_interested_calls": 900,
-    "callback_requested_calls": 300,
-    "connectivity_rate": 80.0,
-    "transfer_rate": 37.5,
-    "success_rate": 96.0,
-    "total_days": 30
-  }
-}
+```
+PUT /api/admin/blocklist/enabled
 ```
 
-**Example:**
-```bash
-curl -H "X-API-Key: your-api-key" \
-  http://localhost:3000/api/admin/statistics/all-time
+**Request Body**:
+```json
+{
+  "enabled": false
+}
 ```
 
 ---
 
-## What the Orchestrator Stores
+### Get Blocked Attempts
 
-The orchestrator stores call state information **in memory** using the `CallStateManager`. Here's what's stored for each call:
-
-### Stored Data (PendingCall Interface)
-
-```typescript
-interface PendingCall {
-  call_id: string;          // Bland call ID
-  request_id: string;       // Internal request tracking ID
-  lead_id: string;          // Convoso lead ID (dynamic from webhook)
-  list_id: string;          // Convoso list ID (dynamic from webhook) ✅ NEW
-  phone_number: string;     // Lead's phone number
-  first_name: string;       // Lead's first name
-  last_name: string;        // Lead's last name
-  created_at: number;       // Timestamp when call was initiated
-  status: "pending" | "completed" | "failed";
-  error?: string;           // Error message if call failed
-}
 ```
-
-### Storage Duration
-
-- **Pending calls**: Stored until webhook received or 90 minutes (configurable)
-- **Completed calls**: Retained for 90 minutes for dashboard visibility (configurable)
-- **Failed calls**: Retained for 90 minutes for debugging (configurable)
-- **Statistics**: Permanently stored in JSON files (date-wise) in `data/statistics/`
-
-### Configuration
-
-Cache retention is configurable via environment variables:
-```bash
-CACHE_COMPLETED_RETENTION_MINUTES=90    # How long to keep completed calls
-CACHE_PENDING_MAX_AGE_MINUTES=90        # Max age before call marked as stale
-CACHE_CLEANUP_INTERVAL_MINUTES=10       # How often to run cleanup
+GET /api/admin/blocklist/attempts/today
+GET /api/admin/blocklist/attempts/:date
+GET /api/admin/blocklist/statistics?start=YYYY-MM-DD&end=YYYY-MM-DD
 ```
 
 ---
 
-## Error Responses
+## Admin API - Reports
 
-All endpoints follow a consistent error format:
+### Webhook Logs
 
-**401 Unauthorized (Admin endpoints only):**
+```
+GET /api/admin/webhook-logs/today
+GET /api/admin/webhook-logs/:date
+GET /api/admin/webhook-logs/search/phone/:phoneNumber
+GET /api/admin/webhook-logs/search/lead/:leadId
+```
+
+**Purpose**: Monitor webhook activity, troubleshoot issues
+
+---
+
+### Reconciliation Reports
+
+```
+POST /api/admin/reconciliation/generate/:date
+POST /api/admin/reconciliation/generate-today
+GET  /api/admin/reconciliation/:date
+GET  /api/admin/reconciliation/list/all
+```
+
+**Purpose**: Daily reconciliation between systems
+
+---
+
+### Daily Reports
+
+```
+POST /api/admin/daily-report/generate/:date
+POST /api/admin/daily-report/generate-today
+GET  /api/admin/daily-report/:date
+```
+
+**Purpose**: Comprehensive daily performance reports
+
+---
+
+## Authentication
+
+All admin endpoints require authentication via:
+
+### Option 1: Header (Recommended)
+
+```bash
+curl -H "x-api-key: awh_admin_2024_secure_key_change_in_production" \
+  http://localhost:3000/api/admin/health
+```
+
+### Option 2: Query Parameter
+
+```bash
+curl "http://localhost:3000/api/admin/health?api_key=awh_admin_2024_secure_key_change_in_production"
+```
+
+### Unauthorized Response (401)
+
 ```json
 {
-  "success": false,
-  "error": "Unauthorized - Invalid API key"
+  "error": "Unauthorized",
+  "message": "Missing or invalid API key"
 }
 ```
 
-**400 Bad Request:**
+---
+
+## Error Handling
+
+### Common Error Responses
+
+**400 Bad Request**:
 ```json
 {
   "success": false,
@@ -689,21 +789,27 @@ All endpoints follow a consistent error format:
 }
 ```
 
-**404 Not Found:**
+**401 Unauthorized**:
 ```json
 {
-  "success": false,
-  "error": "Call not found",
-  "call_id": "bland_xyz789"
+  "error": "Unauthorized",
+  "message": "Missing or invalid API key"
 }
 ```
 
-**500 Internal Server Error:**
+**404 Not Found**:
 ```json
 {
-  "success": false,
+  "error": "Not Found",
+  "path": "/api/admin/invalid-endpoint"
+}
+```
+
+**500 Internal Server Error**:
+```json
+{
   "error": "Internal Server Error",
-  "message": "Detailed error message"
+  "message": "Failed to process request"
 }
 ```
 
@@ -711,34 +817,51 @@ All endpoints follow a consistent error format:
 
 ## Rate Limiting
 
-The orchestrator includes built-in rate limiting for Bland API calls:
-
-- **Default**: 5 calls per second
-- **Same number protection**: 10 second interval between calls to same number
-- **Configurable** via environment variables
-
-Rate limit stats available in `/api/admin/health` endpoint.
+- **Default Interval**: 2 minutes between calls to same number
+- **Max Daily Attempts**: 8 attempts per lead
+- **Configurable**: Via `/api/admin/calls/protection/config`
 
 ---
 
-## Retool Integration
+## Best Practices
 
-All admin endpoints are designed to work seamlessly with Retool dashboards. Use the API key authentication method with Retool's REST API resource.
-
-**Example Retool Setup:**
-1. Create REST API resource
-2. Base URL: `http://your-server:3000`
-3. Add header: `X-API-Key: your-admin-api-key`
-4. Use endpoints as documented above
-
----
-
-## Support
-
-For issues or questions:
-- GitHub Issues: [github.com/your-repo/issues](https://github.com/anthropics/claude-code/issues)
-- Internal team contact: Delaine (PM), Jeff (AWH Contact)
+1. **Authentication**: Always use header-based API key for security
+2. **Error Handling**: Check `success` field in all responses
+3. **Monitoring**: Use `/api/admin/health` for regular monitoring
+4. **Testing**: Use test mode endpoints in development
+5. **Logging**: Review webhook logs regularly
+6. **Reconciliation**: Run daily reconciliation reports
+7. **Cleanup**: Regularly clear completed calls cache
+8. **Blocklist**: Monitor blocklist statistics for TCPA compliance
 
 ---
 
-*Last Updated: 2025-12-12*
+## Quick Troubleshooting
+
+### Stuck Calls
+1. Check: `GET /api/admin/calls/active`
+2. Remove: `DELETE /api/admin/calls/:call_id`
+3. Clear: `POST /api/admin/cache/clear`
+
+### Failed Convoso Updates
+1. Check logs: `GET /api/admin/webhook-logs/today`
+2. Check blocklist: `GET /api/admin/blocklist`
+3. Verify config: `GET /api/admin/config`
+
+### Redial Issues
+1. Check status: `GET /api/admin/redial-queue/status`
+2. Check records: `GET /api/admin/redial-queue/records`
+3. Process manually: `POST /api/admin/redial-queue/process`
+
+### SMS Issues
+1. Check logs: `GET /api/admin/webhook-logs/search/phone/:phone`
+2. Check blocklist: `GET /api/admin/blocklist`
+3. Reset tracker (test only): `POST /api/admin/test/reset-sms-tracker`
+
+---
+
+**For detailed implementation, see source code in `/src/routes/`**
+
+**Last Updated**: January 13, 2026
+**Version**: 1.0.0
+**Total Endpoints**: 80+
