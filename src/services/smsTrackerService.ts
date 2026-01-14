@@ -8,12 +8,16 @@ import fs from "fs";
 import path from "path";
 import { logger } from "../utils/logger";
 
+// Memory leak prevention: LRU cache with max size
+const MAX_SMS_RECORDS_IN_MEMORY = 10000; // Keep max 10K phone numbers in memory
+
 interface SmsRecord {
   phone_number: string;
   sms_count: number;
   first_sms_timestamp: number;
   last_sms_timestamp: number;
   date: string; // YYYY-MM-DD in EST
+  last_accessed?: number; // For LRU eviction
 }
 
 interface SmsTrackerConfig {
@@ -156,6 +160,38 @@ class SmsTrackerService {
   }
 
   /**
+   * LRU eviction: Remove least recently used records if over limit
+   * Prevents unbounded memory growth with millions of phone numbers
+   */
+  private evictLRU(): void {
+    if (this.records.size <= MAX_SMS_RECORDS_IN_MEMORY) {
+      return; // Under limit, no eviction needed
+    }
+
+    // Sort by last_accessed (oldest first)
+    const entries = Array.from(this.records.entries()).sort((a, b) => {
+      const aAccess = a[1].last_accessed || a[1].last_sms_timestamp;
+      const bAccess = b[1].last_accessed || b[1].last_sms_timestamp;
+      return aAccess - bAccess;
+    });
+
+    // Remove oldest 10% to free up space
+    const removeCount = Math.floor(this.records.size * 0.1);
+    for (let i = 0; i < removeCount && i < entries.length; i++) {
+      const entry = entries[i];
+      if (entry) {
+        this.records.delete(entry[0]);
+      }
+    }
+
+    logger.info("SMS tracker LRU eviction", {
+      removed: removeCount,
+      remaining: this.records.size,
+      max_limit: MAX_SMS_RECORDS_IN_MEMORY,
+    });
+  }
+
+  /**
    * Check if SMS can be sent to this phone number today
    * Returns true if under the limit, false if limit reached
    */
@@ -187,6 +223,9 @@ class SmsTrackerService {
     if (!existing) {
       return true; // No SMS sent yet today
     }
+
+    // Update last accessed time for LRU
+    existing.last_accessed = Date.now();
 
     const canSend = existing.sms_count < this.config.max_sms_per_day;
 
@@ -223,6 +262,7 @@ class SmsTrackerService {
     if (existing) {
       existing.sms_count += 1;
       existing.last_sms_timestamp = now;
+      existing.last_accessed = now; // Update LRU access time
     } else {
       this.records.set(normalized, {
         phone_number: normalized,
@@ -230,7 +270,11 @@ class SmsTrackerService {
         first_sms_timestamp: now,
         last_sms_timestamp: now,
         date: this.currentDate,
+        last_accessed: now, // Set initial access time
       });
+
+      // Memory leak prevention: Evict LRU entries if over limit
+      this.evictLRU();
     }
 
     await this.saveRecords();

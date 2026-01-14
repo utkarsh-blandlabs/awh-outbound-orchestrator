@@ -59,9 +59,78 @@ app.use((req: Request, res: Response, next: NextFunction) => {
 // Routes
 // ============================================================================
 
-// Health check
+// Memory alert thresholds (in MB)
+const MEMORY_THRESHOLDS = {
+  rss: { warning: 400, critical: 500 },         // Total memory
+  heapUsed: { warning: 250, critical: 300 },    // JS heap
+  external: { warning: 80, critical: 100 },     // C++ objects
+};
+
+/**
+ * Get memory usage with alert status
+ */
+function getMemoryStatus() {
+  const mem = process.memoryUsage();
+  const rssM = Math.round(mem.rss / 1024 / 1024);
+  const heapUsedMB = Math.round(mem.heapUsed / 1024 / 1024);
+  const heapTotalMB = Math.round(mem.heapTotal / 1024 / 1024);
+  const externalMB = Math.round(mem.external / 1024 / 1024);
+
+  // Determine alert status
+  let status: "healthy" | "warning" | "critical" = "healthy";
+  const alerts: string[] = [];
+
+  if (rssM >= MEMORY_THRESHOLDS.rss.critical) {
+    status = "critical";
+    alerts.push(`RSS memory critical: ${rssM}MB >= ${MEMORY_THRESHOLDS.rss.critical}MB`);
+  } else if (rssM >= MEMORY_THRESHOLDS.rss.warning) {
+    status = status === "healthy" ? "warning" : status;
+    alerts.push(`RSS memory warning: ${rssM}MB >= ${MEMORY_THRESHOLDS.rss.warning}MB`);
+  }
+
+  if (heapUsedMB >= MEMORY_THRESHOLDS.heapUsed.critical) {
+    status = "critical";
+    alerts.push(`Heap memory critical: ${heapUsedMB}MB >= ${MEMORY_THRESHOLDS.heapUsed.critical}MB`);
+  } else if (heapUsedMB >= MEMORY_THRESHOLDS.heapUsed.warning) {
+    status = status === "healthy" ? "warning" : status;
+    alerts.push(`Heap memory warning: ${heapUsedMB}MB >= ${MEMORY_THRESHOLDS.heapUsed.warning}MB`);
+  }
+
+  if (externalMB >= MEMORY_THRESHOLDS.external.critical) {
+    status = "critical";
+    alerts.push(`External memory critical: ${externalMB}MB >= ${MEMORY_THRESHOLDS.external.critical}MB`);
+  } else if (externalMB >= MEMORY_THRESHOLDS.external.warning) {
+    status = status === "healthy" ? "warning" : status;
+    alerts.push(`External memory warning: ${externalMB}MB >= ${MEMORY_THRESHOLDS.external.warning}MB`);
+  }
+
+  return {
+    status,
+    memory: {
+      rss: `${rssM}MB`,
+      heapUsed: `${heapUsedMB}MB`,
+      heapTotal: `${heapTotalMB}MB`,
+      external: `${externalMB}MB`,
+      heapUsedPercent: Math.round((heapUsedMB / heapTotalMB) * 100) + "%",
+    },
+    thresholds: MEMORY_THRESHOLDS,
+    alerts: alerts.length > 0 ? alerts : undefined,
+  };
+}
+
+// Health check with memory monitoring
 app.get("/health", (req: Request, res: Response) => {
   const versionInfo = versionService.getVersionInfo();
+  const memoryStatus = getMemoryStatus();
+
+  // Log memory warnings/criticals
+  if (memoryStatus.alerts) {
+    logger.warn("Memory threshold exceeded", {
+      status: memoryStatus.status,
+      alerts: memoryStatus.alerts,
+      memory: memoryStatus.memory,
+    });
+  }
 
   res.status(200).json({
     status: "ok",
@@ -72,6 +141,7 @@ app.get("/health", (req: Request, res: Response) => {
     uptime: versionInfo.uptime,
     timestamp: new Date().toISOString(),
     architecture: "async",
+    memory: memoryStatus,
   });
 });
 
