@@ -405,7 +405,103 @@ class DailyCallTrackerService {
   }
 
   /**
-   * Record when call starts
+   * Reserve a call slot IMMEDIATELY after shouldAllowCall passes
+   * This prevents race conditions where multiple processes pass the check
+   * before any record the call. Returns a temporary ID to be replaced later.
+   */
+  reserveCallSlot(
+    phoneNumber: string,
+    leadId: string,
+    requestId: string
+  ): string {
+    this.checkDateRotation();
+
+    const record = this.getOrCreateRecord(phoneNumber);
+
+    // Add lead_id if not already tracked
+    if (!record.lead_ids.includes(leadId)) {
+      record.lead_ids.push(leadId);
+      // Memory leak prevention: Keep only last N lead IDs
+      if (record.lead_ids.length > MAX_LEAD_IDS_PER_NUMBER) {
+        record.lead_ids = record.lead_ids.slice(-MAX_LEAD_IDS_PER_NUMBER);
+      }
+    }
+
+    // Create call attempt with temporary ID (will be updated with real call_id later)
+    const tempCallId = `RESERVED_${requestId}_${Date.now()}`;
+    const attempt: CallAttempt = {
+      call_id: tempCallId,
+      lead_id: leadId,
+      request_id: requestId,
+      timestamp: Date.now(),
+      status: "active",
+    };
+
+    record.calls.push(attempt);
+    // Memory leak prevention: Keep only last N call attempts
+    if (record.calls.length > MAX_CALLS_PER_NUMBER) {
+      record.calls = record.calls.slice(-MAX_CALLS_PER_NUMBER);
+    }
+    record.active_call_id = tempCallId;
+    record.last_call_timestamp = attempt.timestamp;
+
+    this.saveRecords();
+
+    logger.info("Call slot reserved (prevents race condition)", {
+      phone: record.phone_number,
+      lead_id: leadId,
+      temp_call_id: tempCallId,
+      request_id: requestId,
+      total_attempts: record.calls.length,
+    });
+
+    return tempCallId;
+  }
+
+  /**
+   * Update reserved slot with actual call ID from Bland
+   * Called after Bland API returns the real call_id
+   */
+  updateReservedSlot(
+    phoneNumber: string,
+    tempCallId: string,
+    actualCallId: string
+  ): void {
+    this.checkDateRotation();
+
+    const normalized = this.normalizePhone(phoneNumber);
+    const record = this.records.get(normalized);
+
+    if (!record) {
+      logger.warn("No record found to update reserved slot", {
+        phone: normalized,
+        temp_call_id: tempCallId,
+      });
+      return;
+    }
+
+    // Find the call attempt with temp ID and update it
+    const attempt = record.calls.find((c) => c.call_id === tempCallId);
+    if (attempt) {
+      attempt.call_id = actualCallId;
+      logger.info("Updated reserved slot with actual call ID", {
+        phone: record.phone_number,
+        temp_call_id: tempCallId,
+        actual_call_id: actualCallId,
+      });
+    }
+
+    // Update active_call_id if it matches
+    if (record.active_call_id === tempCallId) {
+      record.active_call_id = actualCallId;
+    }
+
+    this.saveRecords();
+  }
+
+  /**
+   * Record when call starts (LEGACY - use reserveCallSlot + updateReservedSlot instead)
+   * Kept for backward compatibility with existing code paths
    */
   recordCallStart(
     phoneNumber: string,
