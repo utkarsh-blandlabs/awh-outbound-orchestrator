@@ -10,6 +10,7 @@ import { statisticsService } from "../services/statisticsService";
 import { schedulerService } from "../services/schedulerService";
 import { dailyCallTracker } from "../services/dailyCallTrackerService";
 import { answeringMachineTracker } from "../services/answeringMachineTrackerService";
+import { redialQueueService } from "../services/redialQueueService";
 import { logger } from "../utils/logger";
 
 const router = Router();
@@ -2156,6 +2157,344 @@ router.post("/test/trigger-call", async (req: Request, res: Response) => {
     });
   } catch (error: any) {
     logger.error("Error triggering test call", { error: error.message });
+    res.status(500).json({
+      success: false,
+      error: error.message,
+    });
+  }
+});
+
+// ============================================================================
+// ANALYTICS ENDPOINTS - Lead Tracking & Reporting
+// ============================================================================
+
+/**
+ * GET /api/admin/analytics/leads-by-date?date=YYYY-MM-DD
+ * Get all leads added on a specific date (when they entered the system)
+ * Shows: unique leads, total leads, source (new vs redial), scheduled callbacks
+ */
+router.get("/analytics/leads-by-date", (req: Request, res: Response) => {
+  try {
+    const date = req.query["date"] as string;
+
+    if (!date || !/^\d{4}-\d{2}-\d{2}$/.test(date)) {
+      return res.status(400).json({
+        success: false,
+        error: "Invalid date format. Use YYYY-MM-DD",
+      });
+    }
+
+    // Parse date in EST timezone
+    const targetDate = new Date(date + "T00:00:00-05:00");
+    const startOfDay = targetDate.getTime();
+    const endOfDay = startOfDay + (24 * 60 * 60 * 1000);
+
+    const allRecords = redialQueueService.getAllRecords({});
+
+    // Filter leads created on this date
+    const leadsOnDate = allRecords.filter((r: any) => {
+      return r.created_at >= startOfDay && r.created_at < endOfDay;
+    });
+
+    // Categorize leads
+    const newLeads = leadsOnDate.filter((r: any) => r.attempts === 0 || r.attempts === 1);
+    const redialLeads = leadsOnDate.filter((r: any) => r.attempts > 1);
+    const scheduledCallbacks = leadsOnDate.filter((r: any) => r.scheduled_callback_time);
+
+    // Get unique phone numbers
+    const uniquePhones = new Set(leadsOnDate.map((r: any) => r.phone_number));
+
+    res.json({
+      success: true,
+      date,
+      timestamp: new Date().toISOString(),
+      summary: {
+        total_leads: leadsOnDate.length,
+        unique_phones: uniquePhones.size,
+        new_leads: newLeads.length,
+        redial_leads: redialLeads.length,
+        scheduled_callbacks: scheduledCallbacks.length,
+      },
+      leads: leadsOnDate.map((r: any) => ({
+        lead_id: r.lead_id,
+        phone_number: r.phone_number,
+        name: `${r.first_name} ${r.last_name}`,
+        created_at_iso: new Date(r.created_at).toISOString(),
+        source: r.attempts <= 1 ? "new_lead" : "redial",
+        total_attempts: r.attempts,
+        attempts_today: r.attempts_today,
+        status: r.status,
+        last_outcome: r.last_outcome,
+        scheduled_callback: r.scheduled_callback_time
+          ? new Date(r.scheduled_callback_time).toISOString()
+          : null,
+      })),
+    });
+  } catch (error: any) {
+    logger.error("Error fetching leads by date", { error: error.message });
+    res.status(500).json({
+      success: false,
+      error: error.message,
+    });
+  }
+});
+
+/**
+ * GET /api/admin/analytics/leads-by-batch?window_minutes=5&limit=10
+ * Get leads grouped by batch (time window when they were pushed from Convoso)
+ * Shows: batch time, lead count per batch, identifies bulk imports
+ */
+router.get("/analytics/leads-by-batch", (req: Request, res: Response) => {
+  try {
+    const windowMinutes = parseInt(req.query["window_minutes"] as string || "5");
+    const limit = parseInt(req.query["limit"] as string || "10");
+
+    const batches = redialQueueService.getLeadsByBatch(windowMinutes);
+    const recentBatches = limit > 0 ? batches.slice(0, limit) : batches;
+
+    const enrichedBatches = recentBatches.map((batch: any) => ({
+      batch_time_iso: batch.batch_time.toISOString(),
+      lead_count: batch.count,
+      unique_phones: new Set(batch.leads.map((l: any) => l.phone_number)).size,
+      leads: batch.leads.map((l: any) => ({
+        lead_id: l.lead_id,
+        phone_number: l.phone_number,
+        name: `${l.first_name} ${l.last_name}`,
+        created_at_iso: new Date(l.created_at).toISOString(),
+        status: l.status,
+      })),
+    }));
+
+    res.json({
+      success: true,
+      timestamp: new Date().toISOString(),
+      window_minutes: windowMinutes,
+      total_batches: batches.length,
+      showing: enrichedBatches.length,
+      batches: enrichedBatches,
+    });
+  } catch (error: any) {
+    logger.error("Error fetching leads by batch", { error: error.message });
+    res.status(500).json({
+      success: false,
+      error: error.message,
+    });
+  }
+});
+
+/**
+ * GET /api/admin/analytics/scheduled-callbacks
+ * Get all leads with scheduled callback requests
+ * Shows: callback time, lead details, status
+ */
+router.get("/analytics/scheduled-callbacks", (req: Request, res: Response) => {
+  try {
+    const allRecords = redialQueueService.getAllRecords({});
+
+    // Filter leads with scheduled callbacks
+    const scheduledLeads = allRecords.filter((r: any) => r.scheduled_callback_time);
+
+    // Sort by scheduled time
+    scheduledLeads.sort((a: any, b: any) =>
+      a.scheduled_callback_time - b.scheduled_callback_time
+    );
+
+    const now = Date.now();
+
+    const enrichedLeads = scheduledLeads.map((r: any) => {
+      const callbackTime = r.scheduled_callback_time;
+      const isPast = callbackTime < now;
+      const minutesUntil = Math.floor((callbackTime - now) / 60000);
+
+      return {
+        lead_id: r.lead_id,
+        phone_number: r.phone_number,
+        name: `${r.first_name} ${r.last_name}`,
+        scheduled_callback_iso: new Date(callbackTime).toISOString(),
+        status: r.status,
+        is_past_due: isPast,
+        minutes_until_callback: isPast ? 0 : minutesUntil,
+        last_outcome: r.last_outcome,
+        attempts: r.attempts,
+        created_at_iso: new Date(r.created_at).toISOString(),
+      };
+    });
+
+    // Categorize
+    const upcoming = enrichedLeads.filter(l => !l.is_past_due);
+    const pastDue = enrichedLeads.filter(l => l.is_past_due);
+
+    res.json({
+      success: true,
+      timestamp: new Date().toISOString(),
+      summary: {
+        total_scheduled: scheduledLeads.length,
+        upcoming: upcoming.length,
+        past_due: pastDue.length,
+      },
+      scheduled_callbacks: enrichedLeads,
+    });
+  } catch (error: any) {
+    logger.error("Error fetching scheduled callbacks", { error: error.message });
+    res.status(500).json({
+      success: false,
+      error: error.message,
+    });
+  }
+});
+
+/**
+ * GET /api/admin/analytics/lead-source?phone=5551234567
+ * Track if a specific lead was new or came from redial queue
+ * Shows: creation date, all call history, source determination
+ */
+router.get("/analytics/lead-source", (req: Request, res: Response) => {
+  try {
+    const phone = req.query["phone"] as string;
+
+    if (!phone) {
+      return res.status(400).json({
+        success: false,
+        error: "Missing required parameter: phone",
+      });
+    }
+
+    // Find lead in redial queue
+    const allRecords = redialQueueService.getAllRecords({});
+    const leadRecord = allRecords.find((r: any) =>
+      r.phone_number.replace(/\D/g, "").includes(phone.replace(/\D/g, ""))
+    );
+
+    if (!leadRecord) {
+      return res.status(404).json({
+        success: false,
+        error: "Lead not found in redial queue",
+        phone,
+      });
+    }
+
+    // Determine source
+    const isNewLead = leadRecord.attempts <= 1;
+    const daysSinceCreation = Math.floor((Date.now() - leadRecord.created_at) / (24 * 60 * 60 * 1000));
+
+    res.json({
+      success: true,
+      lead_id: leadRecord.lead_id,
+      phone_number: leadRecord.phone_number,
+      name: `${leadRecord.first_name} ${leadRecord.last_name}`,
+      source: isNewLead ? "new_lead" : "redial_queue",
+      created_at_iso: new Date(leadRecord.created_at).toISOString(),
+      days_since_creation: daysSinceCreation,
+      call_statistics: {
+        total_attempts: leadRecord.attempts,
+        attempts_today: leadRecord.attempts_today,
+        last_outcome: leadRecord.last_outcome,
+        outcomes_history: leadRecord.outcomes,
+      },
+      call_history: leadRecord.call_history?.map((call: any) => ({
+        call_id: call.call_id,
+        from_number: call.from_number,
+        outcome: call.outcome,
+        timestamp_iso: new Date(call.timestamp).toISOString(),
+      })) || [],
+      status: leadRecord.status,
+      next_redial_iso: leadRecord.next_redial_timestamp
+        ? new Date(leadRecord.next_redial_timestamp).toISOString()
+        : null,
+      scheduled_callback_iso: leadRecord.scheduled_callback_time
+        ? new Date(leadRecord.scheduled_callback_time).toISOString()
+        : null,
+    });
+  } catch (error: any) {
+    logger.error("Error fetching lead source", { error: error.message });
+    res.status(500).json({
+      success: false,
+      error: error.message,
+    });
+  }
+});
+
+/**
+ * GET /api/admin/analytics/daily-summary?date=YYYY-MM-DD
+ * Comprehensive daily summary: new leads, redials, outcomes, scheduled callbacks
+ * Perfect for daily reporting and tracking trends
+ */
+router.get("/analytics/daily-summary", (req: Request, res: Response) => {
+  try {
+    const dateParam = req.query["date"] as string;
+    const date = dateParam || new Date().toISOString().split("T")[0]!;
+
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) {
+      return res.status(400).json({
+        success: false,
+        error: "Invalid date format. Use YYYY-MM-DD",
+      });
+    }
+
+    // Parse date in EST timezone
+    const targetDate = new Date(date + "T00:00:00-05:00");
+    const startOfDay = targetDate.getTime();
+    const endOfDay = startOfDay + (24 * 60 * 60 * 1000);
+
+    const allRecords = redialQueueService.getAllRecords({});
+
+    // Leads added on this date
+    const leadsOnDate = allRecords.filter((r: any) =>
+      r.created_at >= startOfDay && r.created_at < endOfDay
+    );
+
+    // Categorize
+    const newLeads = leadsOnDate.filter((r: any) => r.attempts <= 1);
+    const redialLeads = leadsOnDate.filter((r: any) => r.attempts > 1);
+
+    // Get outcome breakdown
+    const outcomeBreakdown: Record<string, number> = {};
+    leadsOnDate.forEach((r: any) => {
+      if (r.last_outcome) {
+        outcomeBreakdown[r.last_outcome] = (outcomeBreakdown[r.last_outcome] || 0) + 1;
+      }
+    });
+
+    // Status breakdown
+    const statusBreakdown: Record<string, number> = {};
+    leadsOnDate.forEach((r: any) => {
+      statusBreakdown[r.status] = (statusBreakdown[r.status] || 0) + 1;
+    });
+
+    // Scheduled callbacks
+    const scheduledCallbacks = leadsOnDate.filter((r: any) => r.scheduled_callback_time);
+
+    // Pool number usage
+    const poolUsage: Record<string, number> = {};
+    leadsOnDate.forEach((r: any) => {
+      r.call_history?.forEach((call: any) => {
+        if (call.from_number) {
+          poolUsage[call.from_number] = (poolUsage[call.from_number] || 0) + 1;
+        }
+      });
+    });
+
+    res.json({
+      success: true,
+      date,
+      timestamp: new Date().toISOString(),
+      summary: {
+        total_leads_added: leadsOnDate.length,
+        unique_phones: new Set(leadsOnDate.map((r: any) => r.phone_number)).size,
+        new_leads: newLeads.length,
+        redial_leads: redialLeads.length,
+        scheduled_callbacks: scheduledCallbacks.length,
+      },
+      outcomes: outcomeBreakdown,
+      statuses: statusBreakdown,
+      pool_number_usage: poolUsage,
+      top_batches: redialQueueService.getRecentBatches(5, 5).map((batch: any) => ({
+        batch_time_iso: batch.batch_time.toISOString(),
+        lead_count: batch.count,
+      })),
+    });
+  } catch (error: any) {
+    logger.error("Error generating daily summary", { error: error.message });
     res.status(500).json({
       success: false,
       error: error.message,

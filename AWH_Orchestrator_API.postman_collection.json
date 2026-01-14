@@ -2,7 +2,7 @@
 	"info": {
 		"_postman_id": "awh-orchestrator-api-2026",
 		"name": "AWH Outbound Orchestrator - Complete API",
-		"description": "Complete API collection for AWH Outbound Orchestrator with 80+ endpoints.\n\n**Environment Variables Required:**\n- `base_url`: http://localhost:3000 (or your production URL)\n- `admin_api_key`: awh_admin_2024_secure_key_change_in_production\n\n**Categories:**\n1. Webhook Endpoints (No Auth)\n2. Admin - System Management\n3. Admin - Calls Management\n4. Admin - Statistics\n5. Admin - Queue Management\n6. Admin - Blocklist\n7. Admin - Reports\n8. Admin - Test Mode",
+		"description": "Complete API collection for AWH Outbound Orchestrator with 85+ endpoints.\n\n**Environment Variables Required:**\n- `base_url`: http://localhost:3000 (or your production URL)\n- `admin_api_key`: awh_admin_2024_secure_key_change_in_production\n\n**Categories:**\n1. Webhook Endpoints (No Auth)\n2. Admin - System Management\n3. Admin - Calls Management\n4. Admin - Statistics\n5. Admin - Queue Management\n6. Admin - Blocklist\n7. Admin - Reports\n8. Admin - Analytics\n9. Admin - Test Mode",
 		"schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json",
 		"_exporter_id": "awh-orchestrator"
 	},
@@ -2187,7 +2187,181 @@
 			"description": "Reporting endpoints for logs, reconciliation, and daily reports."
 		},
 		{
-			"name": "8. Admin - Test Mode",
+			"name": "8. Admin - Analytics",
+			"item": [
+				{
+					"name": "Get Leads by Date",
+					"request": {
+						"method": "GET",
+						"header": [
+							{
+								"key": "x-api-key",
+								"value": "{{admin_api_key}}",
+								"type": "text"
+							}
+						],
+						"url": {
+							"raw": "{{base_url}}/api/admin/analytics/leads-by-date?date=2026-01-14",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"api",
+								"admin",
+								"analytics",
+								"leads-by-date"
+							],
+							"query": [
+								{
+									"key": "date",
+									"value": "2026-01-14",
+									"description": "Date in YYYY-MM-DD format"
+								}
+							]
+						},
+						"description": "Get all leads added on a specific date. Shows unique leads, total leads, source (new vs redial), scheduled callbacks. Returns leads with categorization and full details."
+					},
+					"response": []
+				},
+				{
+					"name": "Get Leads by Batch",
+					"request": {
+						"method": "GET",
+						"header": [
+							{
+								"key": "x-api-key",
+								"value": "{{admin_api_key}}",
+								"type": "text"
+							}
+						],
+						"url": {
+							"raw": "{{base_url}}/api/admin/analytics/leads-by-batch?window_minutes=5&limit=10",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"api",
+								"admin",
+								"analytics",
+								"leads-by-batch"
+							],
+							"query": [
+								{
+									"key": "window_minutes",
+									"value": "5",
+									"description": "Time window to group leads (default: 5)"
+								},
+								{
+									"key": "limit",
+									"value": "10",
+									"description": "Max number of batches to return (default: 10, 0 for all)"
+								}
+							]
+						},
+						"description": "Get leads grouped by batch time window. Identifies bulk imports from Convoso by grouping leads added within the same time window. Returns batch time, lead count, and lead details."
+					},
+					"response": []
+				},
+				{
+					"name": "Get Scheduled Callbacks",
+					"request": {
+						"method": "GET",
+						"header": [
+							{
+								"key": "x-api-key",
+								"value": "{{admin_api_key}}",
+								"type": "text"
+							}
+						],
+						"url": {
+							"raw": "{{base_url}}/api/admin/analytics/scheduled-callbacks",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"api",
+								"admin",
+								"analytics",
+								"scheduled-callbacks"
+							]
+						},
+						"description": "Get all leads with scheduled callback requests. Shows callback time, lead details, status, and whether callbacks are past due. Returns categorized upcoming and past due callbacks."
+					},
+					"response": []
+				},
+				{
+					"name": "Get Lead Source",
+					"request": {
+						"method": "GET",
+						"header": [
+							{
+								"key": "x-api-key",
+								"value": "{{admin_api_key}}",
+								"type": "text"
+							}
+						],
+						"url": {
+							"raw": "{{base_url}}/api/admin/analytics/lead-source?phone=5551234567",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"api",
+								"admin",
+								"analytics",
+								"lead-source"
+							],
+							"query": [
+								{
+									"key": "phone",
+									"value": "5551234567",
+									"description": "Phone number to lookup (required)"
+								}
+							]
+						},
+						"description": "Track if a specific lead was new or came from redial queue. Shows creation date, complete call history, source determination (new_lead vs redial_queue), and full call statistics."
+					},
+					"response": []
+				},
+				{
+					"name": "Get Daily Summary",
+					"request": {
+						"method": "GET",
+						"header": [
+							{
+								"key": "x-api-key",
+								"value": "{{admin_api_key}}",
+								"type": "text"
+							}
+						],
+						"url": {
+							"raw": "{{base_url}}/api/admin/analytics/daily-summary?date=2026-01-14",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"api",
+								"admin",
+								"analytics",
+								"daily-summary"
+							],
+							"query": [
+								{
+									"key": "date",
+									"value": "2026-01-14",
+									"description": "Date in YYYY-MM-DD format (optional, defaults to today)"
+								}
+							]
+						},
+						"description": "Comprehensive daily summary report. Shows new leads, redials, outcomes breakdown, status breakdown, scheduled callbacks, pool number usage, and top batches. Perfect for daily reporting and tracking trends."
+					},
+					"response": []
+				}
+			],
+			"description": "Lead tracking and analytics endpoints for understanding lead flow, batch imports, callbacks, and daily summaries."
+		},
+		{
+			"name": "9. Admin - Test Mode",
 			"item": [
 				{
 					"name": "Check Test Mode Status",
