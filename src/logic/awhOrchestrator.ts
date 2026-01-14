@@ -130,6 +130,22 @@ export async function handleAwhOutbound(
     }
   }
 
+  // CRITICAL FIX FOR RACE CONDITION: Reserve call slot IMMEDIATELY after passing shouldAllowCall
+  // This prevents multiple processes from passing the check before any record the call
+  // (e.g., when phone pool rotates through 5 numbers, they could all check simultaneously)
+  const tempCallId = dailyCallTracker.reserveCallSlot(
+    payload.phone_number,
+    payload.lead_id,
+    requestId || `req_${Date.now()}`
+  );
+
+  logger.info("Call slot reserved - proceeding with Bland API call", {
+    request_id: requestId,
+    phone: payload.phone_number,
+    lead_id: payload.lead_id,
+    temp_call_id: tempCallId,
+  });
+
   // CRITICAL: Check blocklist BEFORE calling Bland AI (to avoid wasting API calls)
   // This checks dynamic flags for specific phone numbers, lead_ids, or other fields
   const blocklistCheck = blocklistService.shouldBlock({
@@ -138,7 +154,14 @@ export async function handleAwhOutbound(
   });
 
   if (blocklistCheck.blocked) {
-    logger.info("Call blocked by blocklist flag", {
+    // Release reserved slot since call won't be made
+    dailyCallTracker.recordCallFailure(
+      payload.phone_number,
+      tempCallId,
+      blocklistCheck.reason || "Blocked by blocklist flag"
+    );
+
+    logger.info("Call blocked by blocklist flag - released reserved slot", {
       request_id: requestId,
       phone: payload.phone_number,
       lead_id: payload.lead_id,
@@ -146,6 +169,7 @@ export async function handleAwhOutbound(
       flag_id: blocklistCheck.flag?.id,
       flag_field: blocklistCheck.flag?.field,
       flag_value: blocklistCheck.flag?.value,
+      temp_call_id: tempCallId,
     });
 
     // Log blocklist result to webhook logger
@@ -198,18 +222,19 @@ export async function handleAwhOutbound(
     );
     currentStage = OrchestrationStage.WEBHOOK_REGISTERED;
 
-    // Record call start in daily tracker
-    dailyCallTracker.recordCallStart(
+    // Update reserved slot with actual call ID from Bland
+    // This replaces the temporary RESERVED_* ID with the real call_id
+    dailyCallTracker.updateReservedSlot(
       payload.phone_number,
-      payload.lead_id,
-      callResponse.call_id,
-      requestId || ""
+      tempCallId,
+      callResponse.call_id
     );
 
     logger.info("Call initiated, waiting for webhook", {
       request_id: requestId,
       lead_id: payload.lead_id,
       call_id: callResponse.call_id,
+      replaced_temp_id: tempCallId,
     });
 
     const duration = Date.now() - startTime;
@@ -222,11 +247,20 @@ export async function handleAwhOutbound(
   } catch (error: any) {
     const duration = Date.now() - startTime;
 
-    logger.error("Orchestration failed", {
+    // CRITICAL: If Bland API call failed, mark reserved slot as failed
+    // This prevents the temporary reservation from permanently blocking future calls
+    dailyCallTracker.recordCallFailure(
+      payload.phone_number,
+      tempCallId,
+      error.message
+    );
+
+    logger.error("Orchestration failed - reserved slot marked as failed", {
       request_id: requestId,
       stage: currentStage,
       error: error.message,
       phone: payload.phone_number,
+      temp_call_id: tempCallId,
     });
 
     errorLogger.logError(
