@@ -8,6 +8,10 @@ import path from "path";
 import { logger } from "../utils/logger";
 import { CallOutcome } from "../types/awh";
 
+// Memory leak prevention: Hard limits for arrays
+const MAX_CALLS_PER_NUMBER = 50; // Keep last 50 call attempts per number
+const MAX_LEAD_IDS_PER_NUMBER = 20; // Keep last 20 lead IDs per number
+
 interface CallAttempt {
   call_id: string;
   lead_id: string;
@@ -416,6 +420,10 @@ class DailyCallTrackerService {
     // Add lead_id if not already tracked
     if (!record.lead_ids.includes(leadId)) {
       record.lead_ids.push(leadId);
+      // Memory leak prevention: Keep only last N lead IDs
+      if (record.lead_ids.length > MAX_LEAD_IDS_PER_NUMBER) {
+        record.lead_ids = record.lead_ids.slice(-MAX_LEAD_IDS_PER_NUMBER);
+      }
     }
 
     // Create call attempt
@@ -428,6 +436,10 @@ class DailyCallTrackerService {
     };
 
     record.calls.push(attempt);
+    // Memory leak prevention: Keep only last N call attempts
+    if (record.calls.length > MAX_CALLS_PER_NUMBER) {
+      record.calls = record.calls.slice(-MAX_CALLS_PER_NUMBER);
+    }
     record.active_call_id = callId;
     record.last_call_timestamp = attempt.timestamp;
 
