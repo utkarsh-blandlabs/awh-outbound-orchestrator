@@ -129,22 +129,26 @@ router.post("/sms-reply", async (req: Request, res: Response) => {
 
     const payload: SMSWebhookPayload = req.body;
 
-    if (!payload.from || !payload.body) {
+    // Bland.ai sends "message" field, not "body" - support both
+    const smsBody = payload.body || (req.body as any).message;
+
+    if (!payload.from || !smsBody) {
       logger.warn("SMS webhook validation failed - missing fields", {
         requestId,
         has_from: !!payload.from,
         has_body: !!payload.body,
+        has_message: !!(req.body as any).message,
         all_fields: Object.keys(req.body),
       });
       return res.status(400).json({
-        error: "Missing required fields: from, body",
+        error: "Missing required fields: from, body/message",
         received_fields: Object.keys(req.body),
       });
     }
 
     // Normalize phone number
     const phoneNumber = payload.from.replace(/\D/g, "");
-    const replyText = payload.body.trim().toUpperCase();
+    const replyText = smsBody.trim().toUpperCase();
 
     // Load keywords
     const keywords = loadSMSKeywords();
