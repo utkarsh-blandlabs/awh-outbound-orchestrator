@@ -118,7 +118,7 @@
 								"sms-reply"
 							]
 						},
-						"description": "Handles incoming SMS replies. Detects STOP/DNC keywords, positive responses (callback requests), and negative responses."
+						"description": "Handles incoming SMS replies from Bland AI. Automatically processes:\n\n**STOP Keywords (DNC):**\n- Adds to blocklist\n- Removes from SMS queue\n- Updates Convoso with DNC status\n- Marks as completed in redial queue\n\n**Callback Keywords (YES, CALL ME, etc.):**\n- Schedules callback in redial queue (5 min if business hours, 1 hour otherwise)\n- Updates Convoso with CB (callback) status\n\n**Negative Keywords (NO, NOT INTERESTED):**\n- Removes from SMS queue\n- Updates Convoso with NI (not interested) status\n\nAll Convoso updates include timestamp and SMS message context."
 					},
 					"response": []
 				},
