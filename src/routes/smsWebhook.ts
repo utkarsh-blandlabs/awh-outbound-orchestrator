@@ -146,8 +146,13 @@ router.post("/sms-reply", async (req: Request, res: Response) => {
       });
     }
 
-    // Normalize phone number
-    const phoneNumber = payload.from.replace(/\D/g, "");
+    // Normalize phone number - remove all non-digits, then strip leading 1 if present
+    let phoneNumber = payload.from.replace(/\D/g, "");
+
+    // Strip leading 1 (US country code) if present for 11-digit numbers
+    if (phoneNumber.length === 11 && phoneNumber.startsWith("1")) {
+      phoneNumber = phoneNumber.substring(1);
+    }
 
     // CRITICAL: Ignore outbound messages from our pool numbers
     // Only process INBOUND messages (from customers to us)
@@ -163,6 +168,7 @@ router.post("/sms-reply", async (req: Request, res: Response) => {
       logger.debug("Ignoring outbound SMS from our pool number", {
         requestId,
         phone: phoneNumber,
+        original: payload.from,
         message_preview: smsBody.substring(0, 50),
       });
       return res.status(200).json({
