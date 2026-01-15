@@ -148,6 +148,30 @@ router.post("/sms-reply", async (req: Request, res: Response) => {
 
     // Normalize phone number
     const phoneNumber = payload.from.replace(/\D/g, "");
+
+    // CRITICAL: Ignore outbound messages from our pool numbers
+    // Only process INBOUND messages (from customers to us)
+    const ourPoolNumbers = [
+      "5618164018",
+      "5614751320",
+      "5618672347",
+      "5619196836",
+      "5619565858"
+    ];
+
+    if (ourPoolNumbers.includes(phoneNumber)) {
+      logger.debug("Ignoring outbound SMS from our pool number", {
+        requestId,
+        phone: phoneNumber,
+        message_preview: smsBody.substring(0, 50),
+      });
+      return res.status(200).json({
+        success: true,
+        requestId,
+        action: "ignored_outbound_message",
+      });
+    }
+
     const replyText = smsBody.trim().toUpperCase();
 
     // Load keywords
