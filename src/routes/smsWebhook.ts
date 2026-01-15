@@ -251,13 +251,46 @@ async function handleDNCRequest(
       phone: phoneNumber,
     });
 
-    // 3. Update Convoso with DNC status (TODO: implement updateLeadStatus method)
-    // For now, the lead will be blocked and won't receive calls/SMS
-    logger.info("Convoso DNC update", {
-      requestId,
-      phone: phoneNumber,
-      note: "Lead blocked in system - manual Convoso update may be needed",
-    });
+    // 3. Update Convoso with DNC status
+    try {
+      const leadInfo = await convosoService.lookupLeadByPhone(phoneNumber);
+
+      if (leadInfo) {
+        const convosoUpdate = await convosoService.updateLeadDisposition(
+          leadInfo.lead_id,
+          leadInfo.list_id,
+          phoneNumber,
+          "DNC",
+          `DNC requested via SMS: "${message}"`,
+          "SMS_DNC"
+        );
+
+        if (convosoUpdate.success) {
+          logger.info("Convoso updated with DNC status", {
+            requestId,
+            phone: phoneNumber,
+            lead_id: leadInfo.lead_id,
+          });
+        } else {
+          logger.warn("Failed to update Convoso with DNC status", {
+            requestId,
+            phone: phoneNumber,
+            error: convosoUpdate.error,
+          });
+        }
+      } else {
+        logger.warn("Lead not found in Convoso for DNC update", {
+          requestId,
+          phone: phoneNumber,
+        });
+      }
+    } catch (error: any) {
+      logger.error("Error updating Convoso with DNC status", {
+        requestId,
+        phone: phoneNumber,
+        error: error.message,
+      });
+    }
 
     // 4. Mark lead as completed in redial queue (stop all future calls)
     try {
@@ -355,14 +388,37 @@ async function handleCallbackRequest(
       is_business_hours: isBusinessHours,
     });
 
-    // 3. Update Convoso with callback status (TODO: implement updateLeadStatus method)
-    // Callback is scheduled in redial queue, which is the important part
-    logger.info("Convoso callback status", {
-      requestId,
-      phone: phoneNumber,
-      lead_id: leadInfo.lead_id,
-      note: "Callback scheduled in redial queue - manual Convoso update may be needed",
-    });
+    // 3. Update Convoso with callback status
+    try {
+      const convosoUpdate = await convosoService.updateLeadDisposition(
+        leadInfo.lead_id,
+        leadInfo.list_id,
+        phoneNumber,
+        "CALLBACK",
+        `Callback requested via SMS: "${message}"\nScheduled for: ${new Date(callbackTime).toISOString()}`,
+        "SMS_CALLBACK"
+      );
+
+      if (convosoUpdate.success) {
+        logger.info("Convoso updated with callback status", {
+          requestId,
+          phone: phoneNumber,
+          lead_id: leadInfo.lead_id,
+        });
+      } else {
+        logger.warn("Failed to update Convoso with callback status", {
+          requestId,
+          phone: phoneNumber,
+          error: convosoUpdate.error,
+        });
+      }
+    } catch (error: any) {
+      logger.error("Error updating Convoso with callback status", {
+        requestId,
+        phone: phoneNumber,
+        error: error.message,
+      });
+    }
   } catch (error: any) {
     logger.error("Failed to process callback request", {
       requestId,
@@ -396,13 +452,46 @@ async function handleNegativeResponse(
       phone: phoneNumber,
     });
 
-    // 2. Update Convoso with NOT_INTERESTED status (TODO: implement updateLeadStatus method)
-    // SMS removed, which is the important action
-    logger.info("Convoso not interested status", {
-      requestId,
-      phone: phoneNumber,
-      note: "SMS removed - manual Convoso update may be needed",
-    });
+    // 2. Update Convoso with NOT_INTERESTED status
+    try {
+      const leadInfo = await convosoService.lookupLeadByPhone(phoneNumber);
+
+      if (leadInfo) {
+        const convosoUpdate = await convosoService.updateLeadDisposition(
+          leadInfo.lead_id,
+          leadInfo.list_id,
+          phoneNumber,
+          "NOT_INTERESTED",
+          `Not interested response via SMS: "${message}"`,
+          "SMS_NOT_INTERESTED"
+        );
+
+        if (convosoUpdate.success) {
+          logger.info("Convoso updated with not interested status", {
+            requestId,
+            phone: phoneNumber,
+            lead_id: leadInfo.lead_id,
+          });
+        } else {
+          logger.warn("Failed to update Convoso with not interested status", {
+            requestId,
+            phone: phoneNumber,
+            error: convosoUpdate.error,
+          });
+        }
+      } else {
+        logger.warn("Lead not found in Convoso for not interested update", {
+          requestId,
+          phone: phoneNumber,
+        });
+      }
+    } catch (error: any) {
+      logger.error("Error updating Convoso with not interested status", {
+        requestId,
+        phone: phoneNumber,
+        error: error.message,
+      });
+    }
   } catch (error: any) {
     logger.error("Failed to process negative response", {
       requestId,

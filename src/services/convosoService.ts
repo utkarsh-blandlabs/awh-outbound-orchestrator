@@ -325,6 +325,90 @@ class ConvosoService {
     }
   }
 
+  /**
+   * Update lead disposition in Convoso (for SMS replies and other non-call updates)
+   * Used when we need to update status without a full call transcript
+   */
+  async updateLeadDisposition(
+    leadId: string,
+    listId: string,
+    phoneNumber: string,
+    status: string,
+    note: string,
+    source: string = "SMS"
+  ): Promise<{ success: boolean; error?: string }> {
+    try {
+      const convosoPhone = phoneNumber.replace(/^\+1/, "");
+
+      // Map common status keywords to Convoso codes
+      let convosoStatus = status;
+      if (status === "DNC" || status === "STOP") {
+        convosoStatus = "DNC";
+      } else if (status === "CALLBACK" || status === "YES") {
+        convosoStatus = "CB";
+      } else if (status === "NOT_INTERESTED" || status === "NO") {
+        convosoStatus = "NI";
+      }
+
+      logger.info("Updating lead disposition in Convoso", {
+        lead_id: leadId,
+        list_id: listId,
+        phone: convosoPhone,
+        status: convosoStatus,
+        source,
+        note,
+      });
+
+      const requestData: any = {
+        auth_token: config.convoso.authToken,
+        lead_id: leadId,
+        list_id: listId,
+        phone_number: convosoPhone,
+        status: convosoStatus,
+        call_transcript: `[${source}] ${note}\n\nTimestamp: ${new Date().toISOString()}`,
+      };
+
+      const response = await retry(
+        async () => {
+          const result = await this.client.post("/v1/leads/update", null, {
+            params: requestData,
+          });
+          return result.data;
+        },
+        {
+          maxAttempts: config.retry.maxAttempts,
+          shouldRetry: isRetryableHttpError,
+        }
+      );
+
+      if (response.success === false) {
+        throw new Error(response.text || `Convoso API error: ${response.code}`);
+      }
+
+      logger.info("Lead disposition updated successfully in Convoso", {
+        lead_id: leadId,
+        status: convosoStatus,
+        source,
+      });
+
+      return { success: true };
+    } catch (error: any) {
+      logger.error("Failed to update lead disposition in Convoso", {
+        error: error.message,
+        lead_id: leadId,
+        status,
+        source,
+        response: error.response?.data,
+      });
+
+      // Return error instead of throwing - we don't want to fail the webhook
+      return {
+        success: false,
+        error: error.message
+      };
+    }
+  }
+
   private formatTranscriptForConvoso(
     transcript: BlandTranscript,
     convosoStatus: string
