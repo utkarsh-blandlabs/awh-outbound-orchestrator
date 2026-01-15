@@ -167,6 +167,9 @@ export const config = {
   // SMS Automation config (dynamic templates)
   sms: {
     enabled: process.env["SMS_AUTOMATION_ENABLED"] === "true",
+    // Primary SMS number - only calls from this number will trigger SMS
+    // Other pool numbers will only make calls (no SMS)
+    primaryNumber: process.env["SMS_PRIMARY_NUMBER"] || "5619565858",
     // SMS message templates (4 messages)
     message1: process.env["SMS_MESSAGE_1"] ||
       "Hey {{first_name}}, your healthcare plan request has been received! We will be calling you shortly. Or if you prefer, Call us (561) 956-5858 and let's get you covered. Text STOP to be removed anytime.",

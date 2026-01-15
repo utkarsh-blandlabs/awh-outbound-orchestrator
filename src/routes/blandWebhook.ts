@@ -244,33 +244,52 @@ async function processCallCompletion(
     );
 
     // Add lead to SMS queue for VOICEMAIL or NO_ANSWER outcomes (if enabled)
+    // IMPORTANT: Only add to SMS queue if call was from PRIMARY SMS number
+    // This ensures customers receive SMS from a consistent number (not multiple pool numbers)
     if (config.sms.enabled && config.sms.triggers.includes(transcript.outcome)) {
-      try {
-        // Add to SMS queue - scheduler will check Bland conversation history before sending
-        smsSchedulerService.addLead({
-          lead_id: callState.lead_id,
-          phone_number: callState.phone_number,
-          list_id: callState.list_id,
-          first_name: callState.first_name,
-          last_name: callState.last_name,
-          state: callState.state,
-          last_outcome: transcript.outcome,
-          last_call_timestamp: Date.now(),
-        });
+      // Normalize both numbers for comparison (remove +1 and non-digits)
+      const normalizeNumber = (num: string) => num.replace(/\D/g, "").replace(/^1/, "");
+      const callFromNumber = normalizeNumber(callState.from_number || "");
+      const primarySmsNumber = normalizeNumber(config.sms.primaryNumber);
 
-        logger.info("Lead added to SMS queue", {
+      if (callFromNumber === primarySmsNumber) {
+        try {
+          // Add to SMS queue - scheduler will check Bland conversation history before sending
+          smsSchedulerService.addLead({
+            lead_id: callState.lead_id,
+            phone_number: callState.phone_number,
+            list_id: callState.list_id,
+            first_name: callState.first_name,
+            last_name: callState.last_name,
+            state: callState.state,
+            last_outcome: transcript.outcome,
+            last_call_timestamp: Date.now(),
+          });
+
+          logger.info("Lead added to SMS queue", {
+            requestId,
+            lead_id: callState.lead_id,
+            phone: callState.phone_number,
+            outcome: transcript.outcome,
+            from_number: callState.from_number,
+          });
+        } catch (error: any) {
+          logger.error("Failed to add lead to SMS queue", {
+            requestId,
+            lead_id: callState.lead_id,
+            error: error.message,
+          });
+          // Don't fail the webhook if SMS queue fails
+        }
+      } else {
+        logger.info("SMS not triggered - call not from primary SMS number", {
           requestId,
           lead_id: callState.lead_id,
           phone: callState.phone_number,
+          from_number: callState.from_number,
+          primary_sms_number: config.sms.primaryNumber,
           outcome: transcript.outcome,
         });
-      } catch (error: any) {
-        logger.error("Failed to add lead to SMS queue", {
-          requestId,
-          lead_id: callState.lead_id,
-          error: error.message,
-        });
-        // Don't fail the webhook if SMS queue fails
       }
     }
 
@@ -573,6 +592,8 @@ async function processInboundCall(
       });
 
       // Add lead to SMS queue for VOICEMAIL or NO_ANSWER outcomes (if enabled)
+      // NOTE: For INBOUND calls (customer called us), we always trigger SMS
+      // since we control which number responds (always primary SMS number)
       if (config.sms.enabled && config.sms.triggers.includes(transcript.outcome)) {
         try {
           // Add to SMS queue - scheduler will check Bland conversation history before sending
@@ -592,6 +613,7 @@ async function processInboundCall(
             lead_id: leadInfo.lead_id,
             phone: phoneNumber,
             outcome: transcript.outcome,
+            note: "Inbound calls always use primary SMS number",
           });
         } catch (error: any) {
           logger.error("Failed to add lead to SMS queue (inbound)", {
