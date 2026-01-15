@@ -3,6 +3,24 @@ import path from "path";
 import { logger } from "../utils/logger";
 
 /**
+ * Normalize phone number to consistent format (10 digits)
+ * Removes +1, spaces, dashes, parentheses, etc.
+ * Example: "+1 (561) 956-5858" -> "5619565858"
+ */
+function normalizePhoneNumber(phone: string): string {
+  // Remove all non-digit characters
+  const digits = phone.replace(/\D/g, "");
+
+  // If starts with 1 and has 11 digits, remove the leading 1 (US country code)
+  if (digits.length === 11 && digits.startsWith("1")) {
+    return digits.substring(1);
+  }
+
+  // Return as-is if already 10 digits, or if invalid length
+  return digits;
+}
+
+/**
  * Blocklist Flag
  * Represents a rule to block calls based on field/value match
  */
@@ -177,34 +195,72 @@ class BlocklistService {
 
     // Check each flag
     for (const flag of this.config.flags) {
-      const fieldValue = leadData[flag.field];
+      let fieldValue = leadData[flag.field];
 
-      if (fieldValue && fieldValue.toString() === flag.value) {
-        // Match found - this lead should be blocked
-        const reason =
-          flag.reason || `Blocked by flag: ${flag.field}=${flag.value}`;
+      // Normalize phone numbers for comparison (both incoming and stored)
+      if (flag.field === "phone" || flag.field === "phone_number") {
+        if (fieldValue) {
+          fieldValue = normalizePhoneNumber(fieldValue.toString());
+        }
+        // Also compare with normalized flag value
+        const normalizedFlagValue = normalizePhoneNumber(flag.value);
 
-        // Record the blocked attempt
-        this.recordAttempt({
-          timestamp: new Date().toISOString(),
-          field: flag.field,
-          value: flag.value,
-          lead_id: leadData.lead_id,
-          phone: leadData.phone,
-          blocked: true,
-          reason,
-          flag_id: flag.id,
-        });
+        if (fieldValue && fieldValue === normalizedFlagValue) {
+          // Match found - this lead should be blocked
+          const reason =
+            flag.reason || `Blocked by flag: ${flag.field}=${flag.value}`;
 
-        logger.info("Lead blocked by blocklist flag", {
-          field: flag.field,
-          value: flag.value,
-          lead_id: leadData.lead_id,
-          phone: leadData.phone,
-          reason,
-        });
+          // Record the blocked attempt
+          this.recordAttempt({
+            timestamp: new Date().toISOString(),
+            field: flag.field,
+            value: flag.value,
+            lead_id: leadData.lead_id,
+            phone: leadData.phone,
+            blocked: true,
+            reason,
+            flag_id: flag.id,
+          });
 
-        return { blocked: true, reason, flag };
+          logger.info("Lead blocked by blocklist flag", {
+            field: flag.field,
+            value: flag.value,
+            lead_id: leadData.lead_id,
+            phone: leadData.phone,
+            reason,
+          });
+
+          return { blocked: true, reason, flag };
+        }
+      } else {
+        // Non-phone fields: exact match
+        if (fieldValue && fieldValue.toString() === flag.value) {
+          // Match found - this lead should be blocked
+          const reason =
+            flag.reason || `Blocked by flag: ${flag.field}=${flag.value}`;
+
+          // Record the blocked attempt
+          this.recordAttempt({
+            timestamp: new Date().toISOString(),
+            field: flag.field,
+            value: flag.value,
+            lead_id: leadData.lead_id,
+            phone: leadData.phone,
+            blocked: true,
+            reason,
+            flag_id: flag.id,
+          });
+
+          logger.info("Lead blocked by blocklist flag", {
+            field: flag.field,
+            value: flag.value,
+            lead_id: leadData.lead_id,
+            phone: leadData.phone,
+            reason,
+          });
+
+          return { blocked: true, reason, flag };
+        }
       }
     }
 
@@ -214,6 +270,7 @@ class BlocklistService {
 
   /**
    * Add a new blocklist flag
+   * Phone numbers are automatically normalized to 10 digits
    */
   public addFlag(
     field: string,
@@ -221,10 +278,20 @@ class BlocklistService {
     reason?: string,
     added_by?: string
   ): BlocklistFlag {
+    // Normalize phone numbers before storing
+    let normalizedValue = value;
+    if (field === "phone" || field === "phone_number") {
+      normalizedValue = normalizePhoneNumber(value);
+      logger.info("Phone number normalized for blocklist", {
+        original: value,
+        normalized: normalizedValue,
+      });
+    }
+
     const flag: BlocklistFlag = {
-      id: `flag_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
+      id: `flag_${Date.now()}_${Math.random().toString(36).substring(2, 11)}`,
       field,
-      value,
+      value: normalizedValue,
       reason,
       added_at: new Date().toISOString(),
       added_by,
@@ -236,7 +303,8 @@ class BlocklistService {
     logger.info("Blocklist flag added", {
       id: flag.id,
       field,
-      value,
+      value: normalizedValue,
+      original_value: value !== normalizedValue ? value : undefined,
       reason,
     });
 
