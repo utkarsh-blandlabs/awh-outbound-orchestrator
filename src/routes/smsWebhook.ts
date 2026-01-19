@@ -264,7 +264,7 @@ async function handleDNCRequest(
     });
 
     // 1. Add to permanent blocklist
-    const flag = blocklistService.addFlag(
+    const result = blocklistService.addFlag(
       "phone",
       phoneNumber,
       `DNC requested via SMS: "${message}"`,
@@ -274,7 +274,8 @@ async function handleDNCRequest(
     logger.info("Phone number added to DNC blocklist", {
       requestId,
       phone: phoneNumber,
-      flag_id: flag.id,
+      flag_id: result.flag.id,
+      already_existed: result.alreadyExists,
     });
 
     // 2. Remove from SMS queue immediately

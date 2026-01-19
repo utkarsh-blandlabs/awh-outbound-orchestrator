@@ -28,7 +28,8 @@
     "backfill:convoso": "node backfill-missing-convoso-leads.js",
     "report:breakdown": "node get-detailed-breakdown.js",
     "report:date-range": "node get-date-range-report.js",
-    "report:total": "node get-total-leads.js"
+    "report:total": "node get-total-leads.js",
+    "blocklist:normalize": "npx ts-node scripts/normalize-blocklist.ts"
   },
   "dependencies": {
     "axios": "^1.7.0",

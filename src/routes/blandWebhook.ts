@@ -489,7 +489,7 @@ async function processInboundCall(
 
       // Add to permanent blocklist immediately
       const { blocklistService } = await import("../services/blocklistService");
-      blocklistService.addFlag(
+      const result = blocklistService.addFlag(
         "phone",
         phoneNumber,
         "DNC request via inbound call",
@@ -500,6 +500,8 @@ async function processInboundCall(
         requestId,
         phone: phoneNumber,
         lead_id: leadInfo?.lead_id,
+        flag_id: result.flag.id,
+        already_existed: result.alreadyExists,
       });
     }
 

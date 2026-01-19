@@ -269,18 +269,44 @@ class BlocklistService {
   }
 
   /**
+   * Check if a flag already exists for the given field and value
+   * Returns the existing flag if found, null otherwise
+   */
+  public findExistingFlag(field: string, value: string): BlocklistFlag | null {
+    // Normalize phone numbers for comparison
+    let normalizedValue = value;
+    const normalizedField = field === "phone_number" ? "phone" : field;
+
+    if (normalizedField === "phone") {
+      normalizedValue = normalizePhoneNumber(value);
+    }
+
+    const existing = this.config.flags.find(
+      (f) =>
+        (f.field === normalizedField ||
+         (f.field === "phone_number" && normalizedField === "phone")) &&
+        f.value === normalizedValue
+    );
+
+    return existing || null;
+  }
+
+  /**
    * Add a new blocklist flag
    * Phone numbers are automatically normalized to 10 digits
+   * Returns existing flag if already present (idempotent operation)
    */
   public addFlag(
     field: string,
     value: string,
     reason?: string,
     added_by?: string
-  ): BlocklistFlag {
+  ): { flag: BlocklistFlag; alreadyExists: boolean } {
     // Normalize phone numbers before storing
     let normalizedValue = value;
-    if (field === "phone" || field === "phone_number") {
+    const normalizedField = field === "phone_number" ? "phone" : field;
+
+    if (normalizedField === "phone") {
       normalizedValue = normalizePhoneNumber(value);
       logger.info("Phone number normalized for blocklist", {
         original: value,
@@ -288,9 +314,23 @@ class BlocklistService {
       });
     }
 
+    // Check if already exists
+    const existing = this.findExistingFlag(field, value);
+    if (existing) {
+      logger.info("Blocklist flag already exists - skipping duplicate", {
+        id: existing.id,
+        field: normalizedField,
+        value: normalizedValue,
+        original_value: value !== normalizedValue ? value : undefined,
+        existing_reason: existing.reason,
+        existing_added_at: existing.added_at,
+      });
+      return { flag: existing, alreadyExists: true };
+    }
+
     const flag: BlocklistFlag = {
       id: `flag_${Date.now()}_${Math.random().toString(36).substring(2, 11)}`,
-      field,
+      field: normalizedField,
       value: normalizedValue,
       reason,
       added_at: new Date().toISOString(),
@@ -302,13 +342,13 @@ class BlocklistService {
 
     logger.info("Blocklist flag added", {
       id: flag.id,
-      field,
+      field: normalizedField,
       value: normalizedValue,
       original_value: value !== normalizedValue ? value : undefined,
       reason,
     });
 
-    return flag;
+    return { flag, alreadyExists: false };
   }
 
   /**

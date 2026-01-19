@@ -75,14 +75,18 @@ async function addStopNumbersToDNC(): Promise<void> {
       console.log(`Processing ${phoneNumber} (${normalizedPhone})...`);
 
       // 1. Add to blocklist
-      const flag = blocklistService.addFlag(
+      const result = blocklistService.addFlag(
         "phone",
         normalizedPhone,
         "DNC requested via SMS: Manual addition from STOP list 2026-01-10",
         `manual_stop_${Date.now()}_${normalizedPhone}`
       );
 
-      console.log(`  ✓ Added to blocklist (flag: ${flag.id})`);
+      if (result.alreadyExists) {
+        console.log(`  ℹ Already in blocklist (flag: ${result.flag.id})`);
+      } else {
+        console.log(`  ✓ Added to blocklist (flag: ${result.flag.id})`);
+      }
 
       // 2. Remove from SMS queue
       try {
