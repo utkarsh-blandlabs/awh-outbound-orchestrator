@@ -13,6 +13,7 @@
 import { Router, Request, Response } from "express";
 import { blandService } from "../services/blandService";
 import { CallStateManager } from "../services/callStateManager";
+import { blocklistService } from "../services/blocklistService";
 import { logger } from "../utils/logger";
 
 const router = Router();
@@ -153,9 +154,36 @@ async function processCallback(payload: CallbackPayload, requestId: string): Pro
     // ═══════════════════════════════════════════════════════════════
 
     // ═══════════════════════════════════════════════════════════════
-    // STEP 2: 📞 Initiate Bland.ai Call
+    // STEP 2: 🛡️ Check Blocklist (CRITICAL SECURITY)
     // ═══════════════════════════════════════════════════════════════
-    logger.info("📞 STEP 2 | Initiating Bland.ai call", logContext);
+    logger.info("🛡️ BLOCKLIST CHECK | Verifying phone not blocked", logContext);
+
+    const blocklistCheck = blocklistService.shouldBlock({
+      ...payload, // Include all payload fields for flexible blocking
+      phone: payload.phone_number, // Add alias for convenience
+    });
+
+    if (blocklistCheck.blocked) {
+      logger.warn("❌ BLOCKED | Call blocked by blocklist", {
+        ...logContext,
+        reason: blocklistCheck.reason,
+        flag_id: blocklistCheck.flag?.id,
+        flag_field: blocklistCheck.flag?.field,
+        flag_value: blocklistCheck.flag?.value,
+        flag_added_at: blocklistCheck.flag?.added_at,
+      });
+
+      throw new Error(
+        `Call blocked by blocklist: ${blocklistCheck.reason || "Number in DNC list"}`
+      );
+    }
+
+    logger.info("✅ BLOCKLIST CHECK PASSED | Phone number not blocked", logContext);
+
+    // ═══════════════════════════════════════════════════════════════
+    // STEP 3: 📞 Initiate Bland.ai Call
+    // ═══════════════════════════════════════════════════════════════
+    logger.info("📞 STEP 3 | Initiating Bland.ai call", logContext);
 
     const blandCallResponse = await blandService.sendOutboundCall({
       phoneNumber: payload.phone_number,
@@ -164,7 +192,7 @@ async function processCallback(payload: CallbackPayload, requestId: string): Pro
     });
 
     const callId = blandCallResponse.call_id;
-    logger.info("✅ STEP 2 COMPLETE | Bland.ai call initiated", {
+    logger.info("✅ STEP 3 COMPLETE | Bland.ai call initiated", {
       ...logContext,
       call_id: callId,
       bland_status: blandCallResponse.status,
@@ -192,7 +220,7 @@ async function processCallback(payload: CallbackPayload, requestId: string): Pro
     });
 
     // ═══════════════════════════════════════════════════════════════
-    // STEP 3 & 4: ⏳ Waiting for Bland.ai Webhook
+    // STEP 4 & 5: ⏳ Waiting for Bland.ai Webhook
     // ═══════════════════════════════════════════════════════════════
     // When call completes, Bland.ai POSTs to /webhooks/bland-callback
     // That webhook will:
@@ -200,7 +228,7 @@ async function processCallback(payload: CallbackPayload, requestId: string): Pro
     //   2. Get full transcript from Bland.ai
     //   3. Map outcome to Convoso status code
     //   4. Update Convoso with transcript + status
-    logger.info("⏳ STEPS 3-4 PENDING | Waiting for call completion webhook", {
+    logger.info("⏳ STEPS 4-5 PENDING | Waiting for call completion webhook", {
       ...logContext,
       call_id: callId,
       next_webhook: "/webhooks/bland-callback",

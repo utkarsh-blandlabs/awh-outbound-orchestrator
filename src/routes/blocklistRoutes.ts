@@ -44,10 +44,27 @@ router.post("/", (req: Request, res: Response) => {
       });
     }
 
-    const flag = blocklistService.addFlag(field, value, reason);
+    const result = blocklistService.addFlag(field, value, reason);
+
+    if (result.alreadyExists) {
+      logger.info("Blocklist flag already exists - returning existing", {
+        id: result.flag.id,
+        field,
+        value,
+        existing_reason: result.flag.reason,
+        existing_added_at: result.flag.added_at,
+      });
+
+      return res.status(200).json({
+        success: true,
+        message: "Number already present in blocklist",
+        alreadyExists: true,
+        flag: result.flag,
+      });
+    }
 
     logger.info("Blocklist flag added via API", {
-      id: flag.id,
+      id: result.flag.id,
       field,
       value,
     });
@@ -55,7 +72,8 @@ router.post("/", (req: Request, res: Response) => {
     res.status(201).json({
       success: true,
       message: "Blocklist flag added successfully",
-      flag,
+      alreadyExists: false,
+      flag: result.flag,
     });
   } catch (error) {
     logger.error("Failed to add blocklist flag", { error });
