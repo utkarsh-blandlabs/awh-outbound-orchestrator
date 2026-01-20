@@ -157,8 +157,19 @@ class SMSSchedulerService {
     const existingIndex = leads.findIndex(l => l.phone_number === lead.phone_number);
 
     if (existingIndex >= 0) {
-      // Update existing lead
-      leads[existingIndex] = lead;
+      // Update existing lead - PRESERVE original timestamp for SMS cadence
+      // This is critical: The SMS sequence timing is based on the FIRST call timestamp,
+      // not the most recent call. If we overwrite the timestamp, the SMS cadence resets.
+      const existingLead = leads[existingIndex]!;
+      leads[existingIndex] = {
+        ...lead,
+        last_call_timestamp: existingLead.last_call_timestamp, // Keep original!
+      };
+      logger.debug("Updated existing SMS lead - preserved original timestamp", {
+        lead_id: lead.lead_id,
+        phone: lead.phone_number,
+        original_timestamp: new Date(existingLead.last_call_timestamp).toISOString(),
+      });
     } else {
       // Add new lead
       leads.push(lead);

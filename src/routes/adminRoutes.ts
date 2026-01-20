@@ -11,6 +11,7 @@ import { schedulerService } from "../services/schedulerService";
 import { dailyCallTracker } from "../services/dailyCallTrackerService";
 import { answeringMachineTracker } from "../services/answeringMachineTrackerService";
 import { redialQueueService } from "../services/redialQueueService";
+import { badNumbersService } from "../services/badNumbersService";
 import { logger } from "../utils/logger";
 
 const router = Router();
@@ -2499,6 +2500,250 @@ router.get("/analytics/daily-summary", (req: Request, res: Response) => {
       success: false,
       error: error.message,
     });
+  }
+});
+
+// ============================================================================
+// Bad Numbers API Endpoints
+// Manage and query permanently failed phone numbers
+// ============================================================================
+
+/**
+ * GET /api/admin/bad-numbers/stats
+ * Get statistics about bad numbers
+ */
+router.get("/bad-numbers/stats", (req: Request, res: Response) => {
+  try {
+    const stats = badNumbersService.getStats();
+    res.json({
+      success: true,
+      timestamp: new Date().toISOString(),
+      stats,
+    });
+  } catch (error: any) {
+    logger.error("Error fetching bad numbers stats", { error: error.message });
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+/**
+ * GET /api/admin/bad-numbers
+ * Get all bad numbers with optional filtering and pagination
+ * Query params:
+ *   - limit: number (default 100)
+ *   - offset: number (default 0)
+ *   - sortBy: "first_failed_at" | "last_failed_at" | "failure_count"
+ *   - sortOrder: "asc" | "desc"
+ *   - errorContains: string (filter by error message)
+ *   - addedAfter: timestamp (filter by date)
+ *   - addedBefore: timestamp (filter by date)
+ */
+router.get("/bad-numbers", (req: Request, res: Response) => {
+  try {
+    const options = {
+      limit: parseInt(req.query["limit"] as string) || 100,
+      offset: parseInt(req.query["offset"] as string) || 0,
+      sortBy: (req.query["sortBy"] as any) || "last_failed_at",
+      sortOrder: (req.query["sortOrder"] as any) || "desc",
+      errorContains: req.query["errorContains"] as string,
+      addedAfter: req.query["addedAfter"]
+        ? parseInt(req.query["addedAfter"] as string)
+        : undefined,
+      addedBefore: req.query["addedBefore"]
+        ? parseInt(req.query["addedBefore"] as string)
+        : undefined,
+    };
+
+    const result = badNumbersService.getAllBadNumbers(options);
+
+    res.json({
+      success: true,
+      timestamp: new Date().toISOString(),
+      ...result,
+    });
+  } catch (error: any) {
+    logger.error("Error fetching bad numbers", { error: error.message });
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+/**
+ * GET /api/admin/bad-numbers/check/:phoneNumber
+ * Check if a specific phone number is in the bad numbers list
+ */
+router.get("/bad-numbers/check/:phoneNumber", (req: Request, res: Response) => {
+  try {
+    const phoneNumber = req.params["phoneNumber"] as string;
+    const record = badNumbersService.getBadNumberRecord(phoneNumber);
+
+    res.json({
+      success: true,
+      phone_number: phoneNumber,
+      is_bad: record !== null,
+      record: record,
+    });
+  } catch (error: any) {
+    logger.error("Error checking bad number", { error: error.message });
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+/**
+ * POST /api/admin/bad-numbers/check-bulk
+ * Check multiple phone numbers at once
+ * Body: { phone_numbers: string[] }
+ */
+router.post("/bad-numbers/check-bulk", (req: Request, res: Response) => {
+  try {
+    const { phone_numbers } = req.body;
+
+    if (!Array.isArray(phone_numbers)) {
+      return res.status(400).json({
+        success: false,
+        error: "phone_numbers must be an array",
+      });
+    }
+
+    const result = badNumbersService.checkBulk(phone_numbers);
+
+    res.json({
+      success: true,
+      total_checked: phone_numbers.length,
+      bad_count: result.bad.length,
+      good_count: result.good.length,
+      bad: result.bad,
+      good: result.good,
+    });
+  } catch (error: any) {
+    logger.error("Error checking bulk bad numbers", { error: error.message });
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+/**
+ * POST /api/admin/bad-numbers
+ * Manually add a phone number to the bad numbers list
+ * Body: { phone_number, lead_id, error_message, notes? }
+ */
+router.post("/bad-numbers", (req: Request, res: Response) => {
+  try {
+    const { phone_number, lead_id, error_message, notes } = req.body;
+
+    if (!phone_number || !lead_id || !error_message) {
+      return res.status(400).json({
+        success: false,
+        error: "phone_number, lead_id, and error_message are required",
+      });
+    }
+
+    badNumbersService.addBadNumber(
+      phone_number,
+      lead_id,
+      error_message,
+      `manual_${Date.now()}`,
+      undefined,
+      undefined,
+      "manual"
+    );
+
+    if (notes) {
+      badNumbersService.addNote(phone_number, notes);
+    }
+
+    res.json({
+      success: true,
+      message: "Phone number added to bad numbers list",
+      phone_number,
+    });
+  } catch (error: any) {
+    logger.error("Error adding bad number", { error: error.message });
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+/**
+ * DELETE /api/admin/bad-numbers/:phoneNumber
+ * Remove a phone number from the bad numbers list (if verified as good)
+ */
+router.delete("/bad-numbers/:phoneNumber", (req: Request, res: Response) => {
+  try {
+    const phoneNumber = req.params["phoneNumber"] as string;
+    const reason = req.query["reason"] as string;
+
+    const removed = badNumbersService.removeBadNumber(phoneNumber, reason);
+
+    if (removed) {
+      res.json({
+        success: true,
+        message: "Phone number removed from bad numbers list",
+        phone_number: phoneNumber,
+      });
+    } else {
+      res.status(404).json({
+        success: false,
+        error: "Phone number not found in bad numbers list",
+      });
+    }
+  } catch (error: any) {
+    logger.error("Error removing bad number", { error: error.message });
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+/**
+ * PATCH /api/admin/bad-numbers/:phoneNumber/notes
+ * Add or update notes for a bad number record
+ * Body: { notes: string }
+ */
+router.patch("/bad-numbers/:phoneNumber/notes", (req: Request, res: Response) => {
+  try {
+    const phoneNumber = req.params["phoneNumber"] as string;
+    const { notes } = req.body;
+
+    if (!notes) {
+      return res.status(400).json({
+        success: false,
+        error: "notes field is required",
+      });
+    }
+
+    const updated = badNumbersService.addNote(phoneNumber, notes);
+
+    if (updated) {
+      res.json({
+        success: true,
+        message: "Notes updated",
+        phone_number: phoneNumber,
+      });
+    } else {
+      res.status(404).json({
+        success: false,
+        error: "Phone number not found in bad numbers list",
+      });
+    }
+  } catch (error: any) {
+    logger.error("Error updating bad number notes", { error: error.message });
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+/**
+ * GET /api/admin/bad-numbers/export
+ * Export all bad numbers as CSV
+ */
+router.get("/bad-numbers/export", (req: Request, res: Response) => {
+  try {
+    const csv = badNumbersService.exportAsCSV();
+
+    res.setHeader("Content-Type", "text/csv");
+    res.setHeader(
+      "Content-Disposition",
+      `attachment; filename="bad-numbers-${new Date().toISOString().split("T")[0]}.csv"`
+    );
+    res.send(csv);
+  } catch (error: any) {
+    logger.error("Error exporting bad numbers", { error: error.message });
+    res.status(500).json({ success: false, error: error.message });
   }
 });
 
