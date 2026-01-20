@@ -8,6 +8,7 @@ import { answeringMachineTracker } from "../services/answeringMachineTrackerServ
 import { redialQueueService } from "../services/redialQueueService";
 import { failedConvosoLogger } from "../services/failedConvosoLogger";
 import { smsSchedulerService } from "../services/smsSchedulerService";
+import { badNumbersService } from "../services/badNumbersService";
 import { config } from "../config";
 import { BlandTranscript, CallOutcome } from "../types/awh";
 
@@ -199,12 +200,19 @@ async function processCallCompletion(
       lead_id: callState.lead_id,
     });
 
-    // Record statistics
-    statisticsService.recordCallComplete(
-      transcript.outcome,
-      transcript.answered_by,
-      transcript.transcript // Pass full transcript for voicemail detection
-    );
+    // Record statistics - differentiate between completed and failed calls
+    if (transcript.outcome === CallOutcome.FAILED) {
+      // FAILED calls should be recorded as failures, not completions
+      statisticsService.recordCallFailure(
+        (transcript as any).error_message || "Call failed"
+      );
+    } else {
+      statisticsService.recordCallComplete(
+        transcript.outcome,
+        transcript.answered_by,
+        transcript.transcript // Pass full transcript for voicemail detection
+      );
+    }
 
     // Record call completion in daily tracker
     dailyCallTracker.recordCallComplete(
@@ -222,26 +230,58 @@ async function processCallCompletion(
       callState.call_id
     );
 
-    // Add/update in redial queue (will handle success outcomes automatically)
-    // Extract scheduled callback time if present in transcript variables
-    const callbackRequestedAt = (transcript as any)["callback_requested_at"];
-    const scheduledCallbackTime = callbackRequestedAt
-      ? new Date(callbackRequestedAt).getTime()
-      : undefined;
+    // Check if this is a permanently failed number (e.g., "number not found")
+    // If so, add to bad numbers list and skip redial queue
+    const errorMessage = (transcript as any).error_message;
+    const isPermanentFailure =
+      transcript.outcome === CallOutcome.FAILED &&
+      errorMessage &&
+      badNumbersService.isPermanentFailure(errorMessage);
 
-    await redialQueueService.addOrUpdateLead(
-      callState.lead_id,
-      callState.phone_number,
-      callState.list_id,
-      callState.first_name,
-      callState.last_name,
-      callState.state,
-      transcript.outcome,
-      callState.call_id,
-      scheduledCallbackTime,
-      false, // outbound call
-      callState.from_number // Track which pool number was used
-    );
+    if (isPermanentFailure) {
+      // Add to bad numbers list for cross-checking later
+      badNumbersService.addBadNumber(
+        callState.phone_number,
+        callState.lead_id,
+        errorMessage,
+        callState.call_id,
+        `${callState.first_name} ${callState.last_name}`.trim(),
+        callState.list_id,
+        "auto"
+      );
+
+      logger.warn("Permanently failed number - skipping redial queue", {
+        requestId,
+        phone: callState.phone_number,
+        lead_id: callState.lead_id,
+        error_message: errorMessage,
+        call_id: callState.call_id,
+        note: "Added to bad numbers list for cross-checking",
+      });
+
+      // Skip adding to redial queue - this number is permanently bad
+    } else {
+      // Add/update in redial queue (will handle success outcomes automatically)
+      // Extract scheduled callback time if present in transcript variables
+      const callbackRequestedAt = (transcript as any)["callback_requested_at"];
+      const scheduledCallbackTime = callbackRequestedAt
+        ? new Date(callbackRequestedAt).getTime()
+        : undefined;
+
+      await redialQueueService.addOrUpdateLead(
+        callState.lead_id,
+        callState.phone_number,
+        callState.list_id,
+        callState.first_name,
+        callState.last_name,
+        callState.state,
+        transcript.outcome,
+        callState.call_id,
+        scheduledCallbackTime,
+        false, // outbound call
+        callState.from_number // Track which pool number was used
+      );
+    }
 
     // Add lead to SMS queue for VOICEMAIL or NO_ANSWER outcomes (if enabled)
     // IMPORTANT: Only add to SMS queue if call was from PRIMARY SMS number
