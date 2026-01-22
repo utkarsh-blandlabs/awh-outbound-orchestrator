@@ -14,6 +14,7 @@ import { Router, Request, Response } from "express";
 import { blandService } from "../services/blandService";
 import { CallStateManager } from "../services/callStateManager";
 import { blocklistService } from "../services/blocklistService";
+import { dailyCallTracker } from "../services/dailyCallTrackerService";
 import { logger } from "../utils/logger";
 
 const router = Router();
@@ -181,6 +182,49 @@ async function processCallback(payload: CallbackPayload, requestId: string): Pro
     logger.info("✅ BLOCKLIST CHECK PASSED | Phone number not blocked", logContext);
 
     // ═══════════════════════════════════════════════════════════════
+    // STEP 2.5: 🛡️ Check for Active Calls (PREVENT MERGED CALLS)
+    // ═══════════════════════════════════════════════════════════════
+    logger.info("🛡️ ACTIVE CALL CHECK | Verifying no active call to this number", logContext);
+
+    const callProtection = dailyCallTracker.shouldAllowCall(
+      payload.phone_number,
+      payload.lead_id
+    );
+
+    if (!callProtection.allow) {
+      logger.warn("❌ BLOCKED | Call blocked by protection rules", {
+        ...logContext,
+        reason: callProtection.reason,
+        action: callProtection.action,
+      });
+
+      throw new Error(
+        `Call blocked: ${callProtection.reason || "Protection rules violated"}`
+      );
+    }
+
+    // Reserve call slot to prevent race conditions
+    const tempCallId = dailyCallTracker.reserveCallSlot(
+      payload.phone_number,
+      payload.lead_id,
+      requestId
+    );
+
+    if (tempCallId === null) {
+      logger.warn("❌ RACE CONDITION | Slot already reserved by another request", {
+        ...logContext,
+        note: "Another call is already in progress for this number",
+      });
+
+      throw new Error("Call blocked: Another call is already in progress for this number");
+    }
+
+    logger.info("✅ ACTIVE CALL CHECK PASSED | No active call, slot reserved", {
+      ...logContext,
+      temp_call_id: tempCallId,
+    });
+
+    // ═══════════════════════════════════════════════════════════════
     // STEP 3: 📞 Initiate Bland.ai Call
     // ═══════════════════════════════════════════════════════════════
     logger.info("📞 STEP 3 | Initiating Bland.ai call", logContext);
@@ -197,6 +241,13 @@ async function processCallback(payload: CallbackPayload, requestId: string): Pro
       call_id: callId,
       bland_status: blandCallResponse.status,
     });
+
+    // Update reserved slot with actual call ID from Bland
+    dailyCallTracker.updateReservedSlot(
+      payload.phone_number,
+      tempCallId,
+      callId
+    );
 
     // ═══════════════════════════════════════════════════════════════
     // CRITICAL: Store Call State for Webhook Matching
