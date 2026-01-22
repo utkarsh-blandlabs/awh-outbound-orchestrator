@@ -798,31 +798,68 @@ function checkIfDNC(transcript: BlandTranscript, raw: any): boolean {
 function determineOutcome(raw: any): CallOutcome {
   // CRITICAL FIX: Check answered_by FIRST before checking transfer state
   // NEVER transfer voicemail, no-answer, or busy calls to agents!
-  const answeredBy = raw.answered_by?.toLowerCase();
+  const answeredBy = raw.answered_by?.toLowerCase() || "";
+  const pathwayTags = raw.pathway_tags || [];
+  const tagString = pathwayTags.map((t: string) => t.toLowerCase()).join(" ");
+  const duration = raw.call_length || raw.corrected_duration || 0;
 
-  // Priority 1: Check if call went to voicemail/no-answer/busy (never transfer these!)
-  if (answeredBy === "voicemail") {
+  // Priority 1: Check if call went to voicemail (multiple detection methods)
+  if (
+    answeredBy === "voicemail" ||
+    answeredBy === "machine" ||
+    answeredBy === "answering_machine" ||
+    tagString.includes("voicemail") ||
+    tagString.includes("answering machine")
+  ) {
     return CallOutcome.VOICEMAIL;
   }
-  if (answeredBy === "no-answer" || answeredBy === "no_answer") {
+
+  // Priority 2: Check for no-answer (multiple detection methods)
+  if (
+    answeredBy === "no-answer" ||
+    answeredBy === "no_answer" ||
+    answeredBy === "no answer" ||
+    raw.status === "no-answer" ||
+    (answeredBy === "" && duration < 5 && !raw.warm_transfer_call) // No answered_by + very short = no answer
+  ) {
     return CallOutcome.NO_ANSWER;
   }
-  if (answeredBy === "busy") {
+
+  // Priority 3: Check for busy
+  if (
+    answeredBy === "busy" ||
+    raw.status === "busy" ||
+    tagString.includes("busy")
+  ) {
     return CallOutcome.BUSY;
   }
 
-  // Priority 2: ONLY mark as TRANSFERRED if warm_transfer_call.state === "MERGED"
+  // Priority 4: ONLY mark as TRANSFERRED if warm_transfer_call.state === "MERGED"
   // This is the ONLY reliable indicator that customer (HUMAN) actually connected to agent
   // DO NOT trust qualification data, summary mentions, or tags - customer may hang up during hold music
   if (raw.warm_transfer_call && raw.warm_transfer_call.state === "MERGED") {
     return CallOutcome.TRANSFERRED;
   }
 
-  if (raw.completed && raw.status === "completed") {
-    if (raw.variables?.callback_requested === true) {
-      return CallOutcome.CALLBACK;
-    }
+  // Priority 5: Check pathway tags for not interested
+  if (
+    tagString.includes("not interested") ||
+    tagString.includes("not_interested") ||
+    tagString.includes("decline")
+  ) {
+    return CallOutcome.NOT_INTERESTED;
+  }
 
+  // Priority 6: Check for callback request
+  if (
+    raw.variables?.callback_requested === true ||
+    tagString.includes("callback") ||
+    tagString.includes("call back")
+  ) {
+    return CallOutcome.CALLBACK;
+  }
+
+  if (raw.completed && raw.status === "completed") {
     // If completed with human but NO successful transfer, mark as CONFUSED
     // Customer may have qualified but hung up before/during transfer
     // This is NOT a successful transfer - agent never spoke to customer
