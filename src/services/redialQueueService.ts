@@ -10,6 +10,8 @@ import { config } from "../config";
 import { schedulerService } from "./schedulerService";
 import { convosoService } from "./convosoService";
 import { dailyCallTracker } from "./dailyCallTrackerService";
+import { blocklistService } from "./blocklistService";
+import { badNumbersService } from "./badNumbersService";
 
 interface CallHistoryEntry {
   call_id: string;
@@ -1359,6 +1361,41 @@ class RedialQueueService {
             });
 
             // Mark lead as completed to prevent future redialing
+            lead.status = "completed";
+            lead.updated_at = now;
+            await this.saveRecords();
+            skippedCount++;
+            continue;
+          }
+
+          // PRE-CALL SAFETY CHECK #5: Check blocklist (DNC list)
+          const blocklistCheck = blocklistService.shouldBlock({ phone: lead.phone_number });
+          if (blocklistCheck.blocked) {
+            logger.info("SAFETY: Skipping redial - number is in blocklist (DNC)", {
+              lead_id: lead.lead_id,
+              phone: lead.phone_number,
+              reason: blocklistCheck.reason,
+            });
+
+            // Mark as completed to prevent future redialing
+            lead.status = "completed";
+            lead.updated_at = now;
+            await this.saveRecords();
+            skippedCount++;
+            continue;
+          }
+
+          // PRE-CALL SAFETY CHECK #6: Check bad numbers list (permanently failed)
+          if (badNumbersService.isBadNumber(lead.phone_number)) {
+            const badRecord = badNumbersService.getBadNumberRecord(lead.phone_number);
+            logger.info("SAFETY: Skipping redial - number is in bad numbers list", {
+              lead_id: lead.lead_id,
+              phone: lead.phone_number,
+              error_message: badRecord?.error_message,
+              failure_count: badRecord?.failure_count,
+            });
+
+            // Mark as completed to prevent future redialing
             lead.status = "completed";
             lead.updated_at = now;
             await this.saveRecords();

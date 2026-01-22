@@ -14,6 +14,9 @@ import { Router, Request, Response } from "express";
 import { blandService } from "../services/blandService";
 import { CallStateManager } from "../services/callStateManager";
 import { blocklistService } from "../services/blocklistService";
+import { dailyCallTracker } from "../services/dailyCallTrackerService";
+import { convosoService } from "../services/convosoService";
+import { badNumbersService } from "../services/badNumbersService";
 import { logger } from "../utils/logger";
 
 const router = Router();
@@ -181,6 +184,107 @@ async function processCallback(payload: CallbackPayload, requestId: string): Pro
     logger.info("✅ BLOCKLIST CHECK PASSED | Phone number not blocked", logContext);
 
     // ═══════════════════════════════════════════════════════════════
+    // STEP 2.3: 🚫 Check Convoso DNC Status (CRITICAL COMPLIANCE)
+    // ═══════════════════════════════════════════════════════════════
+    logger.info("🚫 DNC CHECK | Verifying number is not DNC in Convoso", logContext);
+
+    const dncStatuses = ["DNC", "DNCA", "DNCL", "DNCQ", "STOP", "DO_NOT_CALL"];
+    try {
+      const dncCheck = await convosoService.shouldSkipLead(
+        payload.phone_number,
+        dncStatuses
+      );
+
+      if (dncCheck.skip) {
+        logger.warn("❌ DNC BLOCKED | Number is DNC in Convoso", {
+          ...logContext,
+          convoso_status: dncCheck.status,
+          reason: dncCheck.reason,
+        });
+
+        throw new Error(
+          `Call blocked: Number is DNC in Convoso (${dncCheck.status})`
+        );
+      }
+
+      logger.info("✅ DNC CHECK PASSED | Number is not DNC", logContext);
+    } catch (dncError: any) {
+      // If it's our DNC block error, rethrow it
+      if (dncError.message.includes("DNC in Convoso")) {
+        throw dncError;
+      }
+      // Otherwise, log and continue (don't block calls if Convoso check fails)
+      logger.warn("⚠️ DNC CHECK WARNING | Convoso check failed, proceeding", {
+        ...logContext,
+        error: dncError.message,
+      });
+    }
+
+    // ═══════════════════════════════════════════════════════════════
+    // STEP 2.4: 🚫 Check Bad Numbers List (PREVENT WASTED API CALLS)
+    // ═══════════════════════════════════════════════════════════════
+    logger.info("🚫 BAD NUMBER CHECK | Verifying number not in bad numbers list", logContext);
+
+    if (badNumbersService.isBadNumber(payload.phone_number)) {
+      const badRecord = badNumbersService.getBadNumberRecord(payload.phone_number);
+
+      logger.warn("❌ BAD NUMBER BLOCKED | Number is in bad numbers list", {
+        ...logContext,
+        error_message: badRecord?.error_message,
+        failure_count: badRecord?.failure_count,
+      });
+
+      throw new Error(
+        `Call blocked: Number previously failed - ${badRecord?.error_message || "Bad number"}`
+      );
+    }
+
+    logger.info("✅ BAD NUMBER CHECK PASSED | Number not in bad list", logContext);
+
+    // ═══════════════════════════════════════════════════════════════
+    // STEP 2.5: 🛡️ Check for Active Calls (PREVENT MERGED CALLS)
+    // ═══════════════════════════════════════════════════════════════
+    logger.info("🛡️ ACTIVE CALL CHECK | Verifying no active call to this number", logContext);
+
+    const callProtection = dailyCallTracker.shouldAllowCall(
+      payload.phone_number,
+      payload.lead_id
+    );
+
+    if (!callProtection.allow) {
+      logger.warn("❌ BLOCKED | Call blocked by protection rules", {
+        ...logContext,
+        reason: callProtection.reason,
+        action: callProtection.action,
+      });
+
+      throw new Error(
+        `Call blocked: ${callProtection.reason || "Protection rules violated"}`
+      );
+    }
+
+    // Reserve call slot to prevent race conditions
+    const tempCallId = dailyCallTracker.reserveCallSlot(
+      payload.phone_number,
+      payload.lead_id,
+      requestId
+    );
+
+    if (tempCallId === null) {
+      logger.warn("❌ RACE CONDITION | Slot already reserved by another request", {
+        ...logContext,
+        note: "Another call is already in progress for this number",
+      });
+
+      throw new Error("Call blocked: Another call is already in progress for this number");
+    }
+
+    logger.info("✅ ACTIVE CALL CHECK PASSED | No active call, slot reserved", {
+      ...logContext,
+      temp_call_id: tempCallId,
+    });
+
+    // ═══════════════════════════════════════════════════════════════
     // STEP 3: 📞 Initiate Bland.ai Call
     // ═══════════════════════════════════════════════════════════════
     logger.info("📞 STEP 3 | Initiating Bland.ai call", logContext);
@@ -197,6 +301,13 @@ async function processCallback(payload: CallbackPayload, requestId: string): Pro
       call_id: callId,
       bland_status: blandCallResponse.status,
     });
+
+    // Update reserved slot with actual call ID from Bland
+    dailyCallTracker.updateReservedSlot(
+      payload.phone_number,
+      tempCallId,
+      callId
+    );
 
     // ═══════════════════════════════════════════════════════════════
     // CRITICAL: Store Call State for Webhook Matching

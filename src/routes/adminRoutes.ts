@@ -12,6 +12,7 @@ import { dailyCallTracker } from "../services/dailyCallTrackerService";
 import { answeringMachineTracker } from "../services/answeringMachineTrackerService";
 import { redialQueueService } from "../services/redialQueueService";
 import { badNumbersService } from "../services/badNumbersService";
+import { blocklistService } from "../services/blocklistService";
 import { logger } from "../utils/logger";
 
 const router = Router();
@@ -713,7 +714,7 @@ router.delete("/scheduler/queue", (req: Request, res: Response) => {
  */
 router.get("/calls/history/:phoneNumber", (req: Request, res: Response) => {
   try {
-    const phoneNumber = req.params["phoneNumber"];
+    const phoneNumber = req.params["phoneNumber"] as string;
 
     if (!phoneNumber) {
       return res.status(400).json({
@@ -724,16 +725,53 @@ router.get("/calls/history/:phoneNumber", (req: Request, res: Response) => {
 
     const history = dailyCallTracker.getCallHistory(phoneNumber);
 
+    // Check blocklist status (permanent DNC list)
+    const blocklistCheck = blocklistService.shouldBlock({ phone: phoneNumber });
+    const blocklistFlag = blocklistCheck.blocked ? blocklistCheck.flag : null;
+
+    // Check bad numbers list (permanently failed numbers)
+    const badNumberRecord = badNumbersService.getBadNumberRecord(phoneNumber);
+
     if (!history) {
-      return res.status(404).json({
-        success: false,
-        error: "No call history found for this number",
+      // Return blocklist/bad number info even if no call history
+      res.json({
+        success: true,
+        history: null,
+        blocklist: {
+          is_blocked: blocklistCheck.blocked,
+          reason: blocklistCheck.reason,
+          flag: blocklistFlag,
+        },
+        bad_number: badNumberRecord ? {
+          is_bad: true,
+          error_message: badNumberRecord.error_message,
+          failure_count: badNumberRecord.failure_count,
+          first_failed_at: new Date(badNumberRecord.first_failed_at).toISOString(),
+        } : null,
       });
+      return;
     }
 
+    // Enhance history with blocklist and bad number info
     res.json({
       success: true,
-      history,
+      history: {
+        ...history,
+        // Override blocked status to include blocklist check
+        blocked: history.blocked || blocklistCheck.blocked,
+        blocked_reason: history.blocked_reason || blocklistCheck.reason,
+      },
+      blocklist: {
+        is_blocked: blocklistCheck.blocked,
+        reason: blocklistCheck.reason,
+        flag: blocklistFlag,
+      },
+      bad_number: badNumberRecord ? {
+        is_bad: true,
+        error_message: badNumberRecord.error_message,
+        failure_count: badNumberRecord.failure_count,
+        first_failed_at: new Date(badNumberRecord.first_failed_at).toISOString(),
+      } : null,
     });
   } catch (error: any) {
     logger.error("Error fetching call history", { error: error.message });

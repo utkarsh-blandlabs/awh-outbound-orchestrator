@@ -250,13 +250,35 @@ async function processCallCompletion(
         "auto"
       );
 
+      // CRITICAL: Also remove from redial queue if already present
+      // This prevents the number from being called again even if it was already queued
+      try {
+        const removed = await redialQueueService.markLeadAsCompleted(
+          callState.phone_number,
+          `Bad number: ${errorMessage}`
+        );
+        if (removed) {
+          logger.info("Removed bad number from redial queue", {
+            requestId,
+            phone: callState.phone_number,
+            lead_id: callState.lead_id,
+          });
+        }
+      } catch (removeError: any) {
+        logger.error("Failed to remove bad number from redial queue", {
+          requestId,
+          phone: callState.phone_number,
+          error: removeError.message,
+        });
+      }
+
       logger.warn("Permanently failed number - skipping redial queue", {
         requestId,
         phone: callState.phone_number,
         lead_id: callState.lead_id,
         error_message: errorMessage,
         call_id: callState.call_id,
-        note: "Added to bad numbers list for cross-checking",
+        note: "Added to bad numbers list and removed from redial queue",
       });
 
       // Skip adding to redial queue - this number is permanently bad

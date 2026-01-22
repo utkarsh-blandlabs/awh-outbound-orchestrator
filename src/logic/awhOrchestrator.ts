@@ -6,6 +6,8 @@ import { schedulerService } from "../services/schedulerService";
 import { dailyCallTracker } from "../services/dailyCallTrackerService";
 import { answeringMachineTracker } from "../services/answeringMachineTrackerService";
 import { blocklistService } from "../services/blocklistService";
+import { convosoService } from "../services/convosoService";
+import { badNumbersService } from "../services/badNumbersService";
 import { webhookLogger } from "../services/webhookLogger";
 import {
   ConvosoWebhookPayload,
@@ -139,6 +141,24 @@ export async function handleAwhOutbound(
     requestId || `req_${Date.now()}`
   );
 
+  // CRITICAL: Handle race condition where slot was taken between shouldAllowCall and reserveCallSlot
+  if (tempCallId === null) {
+    logger.warn("Race condition detected - slot already reserved, queueing request", {
+      request_id: requestId,
+      phone: payload.phone_number,
+      lead_id: payload.lead_id,
+    });
+
+    const queueId = schedulerService.queueRequest("call", payload);
+    return {
+      success: true,
+      lead_id: payload.lead_id,
+      call_id: queueId,
+      outcome: CallOutcome.NO_ANSWER,
+      error: "Request queued: Another call is already in progress for this number",
+    };
+  }
+
   logger.info("Call slot reserved - proceeding with Bland API call", {
     request_id: requestId,
     phone: payload.phone_number,
@@ -193,6 +213,80 @@ export async function handleAwhOutbound(
   // Log that call was allowed by blocklist
   if (requestId) {
     webhookLogger.logBlocklistResult(requestId, false);
+  }
+
+  // CRITICAL: Check Convoso for DNC status BEFORE making call
+  // This catches cases where lead was marked DNC after being queued
+  // DNC statuses to check: DNC, DNCA, DNCL, DNCQ, STOP, etc.
+  const dncStatuses = ["DNC", "DNCA", "DNCL", "DNCQ", "STOP", "DO_NOT_CALL"];
+  try {
+    const dncCheck = await convosoService.shouldSkipLead(
+      payload.phone_number,
+      dncStatuses
+    );
+
+    if (dncCheck.skip) {
+      // Release reserved slot since call won't be made
+      dailyCallTracker.recordCallFailure(
+        payload.phone_number,
+        tempCallId,
+        `DNC in Convoso: ${dncCheck.status}`
+      );
+
+      logger.warn("CRITICAL: Call blocked - number is DNC in Convoso", {
+        request_id: requestId,
+        phone: payload.phone_number,
+        lead_id: payload.lead_id,
+        convoso_status: dncCheck.status,
+        reason: dncCheck.reason,
+        temp_call_id: tempCallId,
+      });
+
+      return {
+        success: false,
+        lead_id: payload.lead_id,
+        call_id: "",
+        outcome: CallOutcome.NO_ANSWER,
+        error: `Blocked: Number is DNC in Convoso (${dncCheck.status})`,
+      };
+    }
+  } catch (dncError: any) {
+    // Don't block calls if Convoso check fails - log and continue
+    logger.warn("Convoso DNC check failed, proceeding with call", {
+      request_id: requestId,
+      phone: payload.phone_number,
+      error: dncError.message,
+    });
+  }
+
+  // Check if number is in bad numbers list (permanently failed numbers)
+  // This prevents wasting API calls on known bad numbers like "number not found"
+  if (badNumbersService.isBadNumber(payload.phone_number)) {
+    const badRecord = badNumbersService.getBadNumberRecord(payload.phone_number);
+
+    // Release reserved slot since call won't be made
+    dailyCallTracker.recordCallFailure(
+      payload.phone_number,
+      tempCallId,
+      `Bad number: ${badRecord?.error_message || "Previously failed"}`
+    );
+
+    logger.info("Call blocked - number is in bad numbers list", {
+      request_id: requestId,
+      phone: payload.phone_number,
+      lead_id: payload.lead_id,
+      error_message: badRecord?.error_message,
+      failure_count: badRecord?.failure_count,
+      temp_call_id: tempCallId,
+    });
+
+    return {
+      success: false,
+      lead_id: payload.lead_id,
+      call_id: "",
+      outcome: CallOutcome.FAILED,
+      error: `Blocked: Number previously failed - ${badRecord?.error_message || "Bad number"}`,
+    };
   }
 
   try {
