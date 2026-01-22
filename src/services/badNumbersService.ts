@@ -90,12 +90,24 @@ class BadNumbersService {
   }
 
   private saveData(): void {
+    const tempPath = `${this.dataFile}.tmp`;
     try {
       this.data.last_updated = Date.now();
       this.data.total_count = Object.keys(this.data.records).length;
-      fs.writeFileSync(this.dataFile, JSON.stringify(this.data, null, 2));
+
+      // Atomic write: write to temp file first, then rename
+      fs.writeFileSync(tempPath, JSON.stringify(this.data, null, 2));
+      fs.renameSync(tempPath, this.dataFile);
     } catch (error: any) {
       logger.error("Failed to save bad numbers data", { error: error.message });
+      // Clean up temp file if it exists
+      try {
+        if (fs.existsSync(tempPath)) {
+          fs.unlinkSync(tempPath);
+        }
+      } catch (cleanupError) {
+        // Ignore cleanup errors
+      }
     }
   }
 

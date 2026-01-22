@@ -153,18 +153,29 @@ class StatisticsService {
   }
 
   /**
-   * Save statistics to file
+   * Save statistics to file (atomic write)
    */
   private saveStats(stats: DailyStats): void {
     const filePath = this.getStatsFilePath(stats.date);
+    const tempPath = `${filePath}.tmp`;
 
     try {
-      fs.writeFileSync(filePath, JSON.stringify(stats, null, 2), "utf-8");
+      // Atomic write: write to temp file first, then rename
+      fs.writeFileSync(tempPath, JSON.stringify(stats, null, 2), "utf-8");
+      fs.renameSync(tempPath, filePath);
     } catch (error: any) {
       logger.error("Failed to save stats", {
         date: stats.date,
         error: error.message,
       });
+      // Clean up temp file if it exists
+      try {
+        if (fs.existsSync(tempPath)) {
+          fs.unlinkSync(tempPath);
+        }
+      } catch (cleanupError) {
+        // Ignore cleanup errors
+      }
     }
   }
 
