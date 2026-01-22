@@ -408,15 +408,33 @@ class DailyCallTrackerService {
    * Reserve a call slot IMMEDIATELY after shouldAllowCall passes
    * This prevents race conditions where multiple processes pass the check
    * before any record the call. Returns a temporary ID to be replaced later.
+   *
+   * CRITICAL FIX: Now performs atomic check-and-reserve to prevent race conditions
+   * where two requests pass shouldAllowCall before either reserves the slot.
+   * Returns null if slot cannot be reserved (another call is active).
    */
   reserveCallSlot(
     phoneNumber: string,
     leadId: string,
     requestId: string
-  ): string {
+  ): string | null {
     this.checkDateRotation();
 
     const record = this.getOrCreateRecord(phoneNumber);
+
+    // CRITICAL RACE CONDITION FIX: Double-check active_call_id before reserving
+    // This catches cases where two requests pass shouldAllowCall simultaneously
+    // before either one sets the active_call_id
+    if (record.active_call_id) {
+      logger.warn("RACE CONDITION PREVENTED: Slot already reserved by another request", {
+        phone: record.phone_number,
+        lead_id: leadId,
+        request_id: requestId,
+        existing_active_call: record.active_call_id,
+        note: "Another request reserved the slot between shouldAllowCall and reserveCallSlot",
+      });
+      return null; // Cannot reserve - slot already taken
+    }
 
     // Add lead_id if not already tracked
     if (!record.lead_ids.includes(leadId)) {

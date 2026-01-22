@@ -139,6 +139,24 @@ export async function handleAwhOutbound(
     requestId || `req_${Date.now()}`
   );
 
+  // CRITICAL: Handle race condition where slot was taken between shouldAllowCall and reserveCallSlot
+  if (tempCallId === null) {
+    logger.warn("Race condition detected - slot already reserved, queueing request", {
+      request_id: requestId,
+      phone: payload.phone_number,
+      lead_id: payload.lead_id,
+    });
+
+    const queueId = schedulerService.queueRequest("call", payload);
+    return {
+      success: true,
+      lead_id: payload.lead_id,
+      call_id: queueId,
+      outcome: CallOutcome.NO_ANSWER,
+      error: "Request queued: Another call is already in progress for this number",
+    };
+  }
+
   logger.info("Call slot reserved - proceeding with Bland API call", {
     request_id: requestId,
     phone: payload.phone_number,
