@@ -5,6 +5,7 @@
 import fs from "fs";
 import path from "path";
 import { logger } from "../utils/logger";
+import { blandService } from "./blandService";
 
 interface DailyStats {
   date: string; // YYYY-MM-DD
@@ -127,13 +128,24 @@ class StatisticsService {
 
   /**
    * Calculate derived metrics
+   *
+   * MARLINEA'S FORMULA:
+   * - connectivity_rate = (transferred_calls / answered_calls) * 100
+   *   This measures: "Of the calls we answered, how many transferred successfully?"
+   *   Example: 24 transferred / 50 answered = 48% connectivity rate
+   *
+   * - transfer_rate is kept the same (also transferred/answered) for backwards compatibility
+   * - success_rate = (completed_calls / total_calls) * 100
    */
   private calculateRates(stats: DailyStats): DailyStats {
+    // UPDATED: Connectivity rate now matches Marlinea's formula
+    // transferred_calls / answered_calls (not answered_calls / total_calls)
     stats.connectivity_rate =
-      stats.total_calls > 0
-        ? (stats.answered_calls / stats.total_calls) * 100
+      stats.answered_calls > 0
+        ? (stats.transferred_calls / stats.answered_calls) * 100
         : 0;
 
+    // Transfer rate (same formula as connectivity rate for backwards compatibility)
     stats.transfer_rate =
       stats.answered_calls > 0
         ? (stats.transferred_calls / stats.answered_calls) * 100
@@ -180,68 +192,16 @@ class StatisticsService {
   }
 
   /**
-   * Check if a call is actually voicemail (not a real human conversation)
-   * Uses multiple signals to accurately detect voicemails
-   */
-  private isActuallyVoicemail(
-    transcript: string,
-    answered_by: string,
-    outcome: string
-  ): boolean {
-    // Priority 1: Explicitly marked as voicemail/no-answer by Bland
-    const answeredByLower = answered_by.toLowerCase();
-    if (
-      answeredByLower === "voicemail" ||
-      answeredByLower === "no-answer" ||
-      answeredByLower === "no_answer"
-    ) {
-      return true;
-    }
-
-    // Priority 2: Check transcript for Ashley's voicemail script
-    // This is the MOST RELIABLE indicator - if Ashley left voicemail message, it's 100% voicemail
-    const voicemailIndicators = [
-      "i'm reaching out because you inquired about health insurance", // Ashley's voicemail script opening
-      "please give me a call back at", // Ashley's voicemail callback request
-      "you've reached the voicemail", // Generic voicemail greeting
-      "please leave a message", // Voicemail prompt
-      "is not available right now", // Common voicemail phrase
-      "cannot take your call", // Common voicemail phrase
-      "press 1 to leave a message", // Voicemail system prompt
-    ];
-
-    const transcriptLower = transcript.toLowerCase();
-    const hasVoicemailScript = voicemailIndicators.some((indicator) =>
-      transcriptLower.includes(indicator)
-    );
-
-    if (hasVoicemailScript) {
-      return true;
-    }
-
-    // Priority 3: Check outcome
-    const outcomeLower = outcome.toLowerCase();
-    if (
-      outcomeLower.includes("voicemail") ||
-      outcomeLower.includes("no_answer") ||
-      outcomeLower.includes("no answer")
-    ) {
-      return true;
-    }
-
-    return false;
-  }
-
-  /**
    * Record a call completion
    * @param outcome - Call outcome (e.g., TRANSFERRED, VOICEMAIL, NO_ANSWER)
-   * @param answered_by - Bland's detection (human, voicemail, no-answer, busy)
-   * @param transcript - Full call transcript (used to detect voicemail scripts)
+   * @param pathway_tags - Bland pathway tags (used to match Marlinea's filtering logic)
+   *
+   * NOTE: answered_by and transcript parameters removed - we now use pathway_tags
+   * to match Marlinea's Bland filter logic for answered/transferred counts.
    */
   recordCallComplete(
     outcome: string,
-    answered_by?: string,
-    transcript?: string
+    pathway_tags?: string[]
   ): void {
     const today = this.getTodayDate();
     const stats = this.getStatsByDate(today);
@@ -252,31 +212,35 @@ class StatisticsService {
     // Categorize by outcome
     const normalizedOutcome = outcome.toLowerCase();
 
-    // CRITICAL FIX: Check if it's actually voicemail before counting as answered
-    // This fixes the bug where voicemails reaching "Identity Confirmation" were counted as answered
-    const isVoicemail = this.isActuallyVoicemail(
-      transcript || "",
-      answered_by || "",
-      outcome
-    );
+    // Normalize pathway tags for matching (case-insensitive)
+    const tags = (pathway_tags || []).map((t) => t.toLowerCase());
 
-    // Only count as "answered" if:
-    // 1. NOT a voicemail (verified via transcript + Bland detection)
-    // 2. AND has indicators of human interaction
-    if (
-      !isVoicemail &&
-      (answered_by === "human" ||
-        normalizedOutcome.includes("transfer") ||
-        normalizedOutcome.includes("sale") ||
-        normalizedOutcome.includes("not_interested"))
-    ) {
+    // ============================================================================
+    // MARLINEA'S LOGIC FOR ANSWERED CALLS:
+    // A call is "answered" if it has EITHER:
+    // - "Plan Type" tag (human engaged enough to discuss plan), OR
+    // - "Voicemail Left" tag (successfully left a voicemail)
+    // This matches the Bland filter: Tags includes "Plan Type" OR "Voicemail Left"
+    // ============================================================================
+    const hasPlanTypeTag = tags.some((tag) => tag.includes("plan type"));
+    const hasVoicemailLeftTag = tags.some((tag) => tag.includes("voicemail left"));
+
+    if (hasPlanTypeTag || hasVoicemailLeftTag) {
       stats.answered_calls++;
     }
 
-    if (normalizedOutcome.includes("transfer")) {
+    // ============================================================================
+    // MARLINEA'S LOGIC FOR TRANSFERRED CALLS:
+    // A call is "transferred" if it has "Transferred to Agent" tag
+    // This matches the Bland filter: Tags includes "Transferred to Agent"
+    // ============================================================================
+    const hasTransferredTag = tags.some((tag) => tag.includes("transferred to agent"));
+
+    if (hasTransferredTag) {
       stats.transferred_calls++;
     }
 
+    // Continue tracking other outcome-based stats for internal reporting
     if (normalizedOutcome.includes("voicemail") || normalizedOutcome.includes("machine")) {
       stats.voicemail_calls++;
     }
@@ -302,7 +266,13 @@ class StatisticsService {
     logger.info("Statistics updated", {
       date: today,
       outcome,
+      pathway_tags: tags,
+      has_plan_type: hasPlanTypeTag,
+      has_voicemail_left: hasVoicemailLeftTag,
+      has_transferred: hasTransferredTag,
       total_calls: stats.total_calls,
+      answered_calls: stats.answered_calls,
+      transferred_calls: stats.transferred_calls,
     });
   }
 
@@ -367,6 +337,143 @@ class StatisticsService {
       ...this.calculateRates(allStats),
       total_days: totalDays,
     };
+  }
+
+  /**
+   * Recalculate statistics for a specific date by fetching call logs from Bland API
+   * Uses Marlinea's logic:
+   * - answered_calls = calls with "Plan Type" OR "Voicemail Left" tags
+   * - transferred_calls = calls with "Transferred to Agent" tag
+   * - connectivity_rate = transferred_calls / answered_calls * 100
+   *
+   * @param date - Date in YYYY-MM-DD format
+   * @param pathwayId - Optional pathway ID filter
+   * @returns Updated statistics for the date
+   */
+  async recalculateStatsFromBland(
+    date: string,
+    pathwayId?: string
+  ): Promise<DailyStats> {
+    logger.info("Recalculating statistics from Bland API", { date, pathwayId });
+
+    try {
+      // Fetch call logs from Bland
+      const calls = await blandService.getCallLogsByDate(date, pathwayId);
+
+      // Initialize fresh stats
+      const stats = this.initializeStats(date);
+
+      // Process each call using Marlinea's logic
+      for (const call of calls) {
+        stats.total_calls++;
+        stats.completed_calls++;
+
+        // Normalize tags for matching
+        const tags = call.pathway_tags.map((t) => t.toLowerCase());
+
+        // MARLINEA'S LOGIC: answered = "Plan Type" OR "Voicemail Left" tag
+        const hasPlanTypeTag = tags.some((tag) => tag.includes("plan type"));
+        const hasVoicemailLeftTag = tags.some((tag) =>
+          tag.includes("voicemail left")
+        );
+
+        if (hasPlanTypeTag || hasVoicemailLeftTag) {
+          stats.answered_calls++;
+        }
+
+        // MARLINEA'S LOGIC: transferred = "Transferred to Agent" tag
+        const hasTransferredTag = tags.some((tag) =>
+          tag.includes("transferred to agent")
+        );
+
+        if (hasTransferredTag) {
+          stats.transferred_calls++;
+        }
+
+        // Track other stats based on answered_by for internal reporting
+        const answeredBy = call.answered_by.toLowerCase();
+        if (answeredBy === "voicemail" || answeredBy === "machine") {
+          stats.voicemail_calls++;
+        }
+        if (answeredBy === "no-answer" || answeredBy === "no_answer") {
+          stats.no_answer_calls++;
+        }
+        if (answeredBy === "busy") {
+          stats.busy_calls++;
+        }
+      }
+
+      // Calculate rates and save
+      const finalStats = this.calculateRates(stats);
+      this.saveStats(finalStats);
+
+      logger.info("Statistics recalculated successfully", {
+        date,
+        total_calls: finalStats.total_calls,
+        answered_calls: finalStats.answered_calls,
+        transferred_calls: finalStats.transferred_calls,
+        connectivity_rate: finalStats.connectivity_rate,
+      });
+
+      return finalStats;
+    } catch (error: any) {
+      logger.error("Failed to recalculate statistics", {
+        date,
+        error: error.message,
+      });
+      throw error;
+    }
+  }
+
+  /**
+   * Recalculate statistics for a date range
+   *
+   * @param startDate - Start date in YYYY-MM-DD format
+   * @param endDate - End date in YYYY-MM-DD format
+   * @param pathwayId - Optional pathway ID filter
+   * @returns Array of updated statistics for each date
+   */
+  async recalculateStatsForDateRange(
+    startDate: string,
+    endDate: string,
+    pathwayId?: string
+  ): Promise<DailyStats[]> {
+    logger.info("Recalculating statistics for date range", {
+      startDate,
+      endDate,
+      pathwayId,
+    });
+
+    const results: DailyStats[] = [];
+    const start = new Date(startDate);
+    const end = new Date(endDate);
+
+    for (let d = new Date(start); d <= end; d.setDate(d.getDate() + 1)) {
+      const dateStr = d.toISOString().split("T")[0];
+      if (dateStr) {
+        try {
+          const stats = await this.recalculateStatsFromBland(dateStr, pathwayId);
+          results.push(stats);
+
+          // Small delay to avoid rate limiting
+          await new Promise((resolve) => setTimeout(resolve, 1000));
+        } catch (error: any) {
+          logger.error("Failed to recalculate stats for date", {
+            date: dateStr,
+            error: error.message,
+          });
+          // Continue with next date even if one fails
+        }
+      }
+    }
+
+    logger.info("Finished recalculating statistics for date range", {
+      startDate,
+      endDate,
+      dates_processed: results.length,
+    });
+
+    return results;
   }
 }
 

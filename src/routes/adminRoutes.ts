@@ -826,6 +826,120 @@ router.get("/calls/stats/daily", (req: Request, res: Response) => {
 });
 
 /**
+ * POST /api/admin/calls/stats/recalculate
+ * Recalculate statistics for a specific date from Bland API
+ * Uses Marlinea's logic:
+ * - answered_calls = calls with "Plan Type" OR "Voicemail Left" tags
+ * - transferred_calls = calls with "Transferred to Agent" tag
+ * - connectivity_rate = transferred_calls / answered_calls * 100
+ *
+ * Body: { date: "YYYY-MM-DD", pathway_id?: string }
+ */
+router.post("/calls/stats/recalculate", async (req: Request, res: Response) => {
+  try {
+    const { date, pathway_id } = req.body;
+
+    if (!date) {
+      return res.status(400).json({
+        success: false,
+        error: "date is required (format: YYYY-MM-DD)",
+      });
+    }
+
+    // Validate date format
+    const dateRegex = /^\d{4}-\d{2}-\d{2}$/;
+    if (!dateRegex.test(date)) {
+      return res.status(400).json({
+        success: false,
+        error: "Invalid date format. Use YYYY-MM-DD",
+      });
+    }
+
+    logger.info("Recalculating stats from Bland API", {
+      date,
+      pathway_id,
+      triggered_by: (req.headers["x-user"] as string) || "unknown",
+    });
+
+    const stats = await statisticsService.recalculateStatsFromBland(
+      date,
+      pathway_id
+    );
+
+    res.json({
+      success: true,
+      message: "Statistics recalculated successfully",
+      stats,
+    });
+  } catch (error: any) {
+    logger.error("Error recalculating stats", { error: error.message });
+    res.status(500).json({
+      success: false,
+      error: error.message,
+    });
+  }
+});
+
+/**
+ * POST /api/admin/calls/stats/recalculate-range
+ * Recalculate statistics for a date range from Bland API
+ *
+ * Body: { start_date: "YYYY-MM-DD", end_date: "YYYY-MM-DD", pathway_id?: string }
+ */
+router.post(
+  "/calls/stats/recalculate-range",
+  async (req: Request, res: Response) => {
+    try {
+      const { start_date, end_date, pathway_id } = req.body;
+
+      if (!start_date || !end_date) {
+        return res.status(400).json({
+          success: false,
+          error: "start_date and end_date are required (format: YYYY-MM-DD)",
+        });
+      }
+
+      // Validate date format
+      const dateRegex = /^\d{4}-\d{2}-\d{2}$/;
+      if (!dateRegex.test(start_date) || !dateRegex.test(end_date)) {
+        return res.status(400).json({
+          success: false,
+          error: "Invalid date format. Use YYYY-MM-DD",
+        });
+      }
+
+      logger.info("Recalculating stats for date range from Bland API", {
+        start_date,
+        end_date,
+        pathway_id,
+        triggered_by: (req.headers["x-user"] as string) || "unknown",
+      });
+
+      const results = await statisticsService.recalculateStatsForDateRange(
+        start_date,
+        end_date,
+        pathway_id
+      );
+
+      res.json({
+        success: true,
+        message: `Statistics recalculated for ${results.length} days`,
+        dates_processed: results.length,
+        results,
+      });
+    } catch (error: any) {
+      logger.error("Error recalculating stats for range", {
+        error: error.message,
+      });
+      res.status(500).json({
+        success: false,
+        error: error.message,
+      });
+    }
+  }
+);
+
+/**
  * POST /api/admin/calls/block
  * Manually block a phone number
  */

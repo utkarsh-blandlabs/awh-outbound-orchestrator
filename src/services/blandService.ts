@@ -445,6 +445,100 @@ class BlandService {
   private sleep(ms: number): Promise<void> {
     return new Promise((resolve) => setTimeout(resolve, ms));
   }
+
+  /**
+   * Fetch call logs from Bland API for a specific date
+   * Used for recalculating historical statistics
+   *
+   * @param date - Date in YYYY-MM-DD format
+   * @param pathwayId - Optional pathway ID filter (defaults to config pathway)
+   * @returns Array of call objects with pathway_tags
+   */
+  async getCallLogsByDate(
+    date: string,
+    pathwayId?: string
+  ): Promise<
+    Array<{
+      call_id: string;
+      pathway_tags: string[];
+      status: string;
+      answered_by: string;
+      created_at: string;
+    }>
+  > {
+    const targetPathwayId = pathwayId || config.bland.pathwayId;
+
+    logger.info("Fetching call logs from Bland", {
+      date,
+      pathway_id: targetPathwayId,
+    });
+
+    try {
+      // Bland API: GET /v1/calls with filters
+      // created_at filter uses ISO date format
+      const startOfDay = `${date}T00:00:00.000Z`;
+      const endOfDay = `${date}T23:59:59.999Z`;
+
+      const allCalls: Array<{
+        call_id: string;
+        pathway_tags: string[];
+        status: string;
+        answered_by: string;
+        created_at: string;
+      }> = [];
+
+      let hasMore = true;
+      let cursor: string | undefined;
+
+      while (hasMore) {
+        const params: Record<string, any> = {
+          limit: 1000, // Max per page
+          from_date: startOfDay,
+          to_date: endOfDay,
+          ...(targetPathwayId && { pathway_id: targetPathwayId }),
+          ...(cursor && { cursor }),
+        };
+
+        const response = await this.client.get("/v1/calls", { params });
+
+        const calls = response.data.calls || [];
+        for (const call of calls) {
+          allCalls.push({
+            call_id: call.call_id,
+            pathway_tags: call.pathway_tags || [],
+            status: call.status,
+            answered_by: call.answered_by || "",
+            created_at: call.created_at,
+          });
+        }
+
+        // Check for pagination
+        cursor = response.data.cursor;
+        hasMore = !!cursor && calls.length > 0;
+
+        logger.info("Fetched page of call logs", {
+          date,
+          page_size: calls.length,
+          total_so_far: allCalls.length,
+          has_more: hasMore,
+        });
+      }
+
+      logger.info("Finished fetching call logs", {
+        date,
+        total_calls: allCalls.length,
+      });
+
+      return allCalls;
+    } catch (error: any) {
+      logger.error("Failed to fetch call logs from Bland", {
+        date,
+        error: error.message,
+        response: error.response?.data,
+      });
+      throw new Error(`Failed to fetch call logs: ${error.message}`);
+    }
+  }
 }
 
 export const blandService = new BlandService();
