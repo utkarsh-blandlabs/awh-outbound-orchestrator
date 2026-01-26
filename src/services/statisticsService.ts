@@ -212,10 +212,16 @@ class StatisticsService {
     // Categorize by outcome
     const normalizedOutcome = outcome.toLowerCase();
 
-    // Normalize pathway tags for matching (filter out null/undefined and convert to lowercase)
+    // Normalize pathway tags for matching
+    // Bland API can return tags as objects: [{name: "Tag Name", color: "#hex"}] or as strings
+    // We need to handle both formats and extract tag names
     const tags = (pathway_tags || [])
-      .filter((t): t is string => typeof t === "string")
-      .map((t) => t.toLowerCase());
+      .map((t: any) => {
+        if (typeof t === "string") return t.toLowerCase();
+        if (t && typeof t === "object" && t.name) return t.name.toLowerCase();
+        return null;
+      })
+      .filter((t): t is string => t !== null);
 
     // ============================================================================
     // MARLINEA'S LOGIC FOR ANSWERED CALLS:
@@ -370,10 +376,16 @@ class StatisticsService {
         stats.total_calls++;
         stats.completed_calls++;
 
-        // Normalize tags for matching (filter out null/undefined and convert to lowercase)
+        // Normalize tags for matching
+        // Bland API returns tags as objects: [{name: "Tag Name", color: "#hex"}]
+        // We need to extract the name property and convert to lowercase
         const tags = (call.pathway_tags || [])
-          .filter((t): t is string => typeof t === "string")
-          .map((t) => t.toLowerCase());
+          .map((t: any) => {
+            if (typeof t === "string") return t.toLowerCase();
+            if (t && typeof t === "object" && t.name) return t.name.toLowerCase();
+            return null;
+          })
+          .filter((t): t is string => t !== null);
 
         // MARLINEA'S LOGIC: answered = "Plan Type" OR "Voicemail Left" tag
         const hasPlanTypeTag = tags.some((tag) => tag.includes("plan type"));
