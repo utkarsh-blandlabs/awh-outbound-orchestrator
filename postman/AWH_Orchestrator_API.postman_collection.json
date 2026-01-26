@@ -621,135 +621,367 @@
 			"name": "4. Admin - Statistics",
 			"item": [
 				{
-					"name": "Get Today's Statistics",
-					"request": {
-						"method": "GET",
-						"header": [
-							{
-								"key": "x-api-key",
-								"value": "{{admin_api_key}}",
-								"type": "text"
-							}
-						],
-						"url": {
-							"raw": "{{base_url}}/api/admin/statistics/today",
-							"host": [
-								"{{base_url}}"
-							],
-							"path": [
-								"api",
-								"admin",
-								"statistics",
-								"today"
-							]
-						},
-						"description": "Get call outcome statistics for today. Returns total calls, human answered, voicemail, transferred, DNC requests, etc."
-					},
-					"response": []
-				},
-				{
-					"name": "Get Statistics for Date",
-					"request": {
-						"method": "GET",
-						"header": [
-							{
-								"key": "x-api-key",
-								"value": "{{admin_api_key}}",
-								"type": "text"
-							}
-						],
-						"url": {
-							"raw": "{{base_url}}/api/admin/statistics/date/:date",
-							"host": [
-								"{{base_url}}"
-							],
-							"path": [
-								"api",
-								"admin",
-								"statistics",
-								"date",
-								":date"
-							],
-							"variable": [
-								{
-									"key": "date",
-									"value": "2026-01-13",
-									"description": "Format: YYYY-MM-DD"
-								}
-							]
-						},
-						"description": "Get statistics for a specific date. Format: YYYY-MM-DD"
-					},
-					"response": []
-				},
-				{
-					"name": "Get Statistics for Date Range",
-					"request": {
-						"method": "GET",
-						"header": [
-							{
-								"key": "x-api-key",
-								"value": "{{admin_api_key}}",
-								"type": "text"
-							}
-						],
-						"url": {
-							"raw": "{{base_url}}/api/admin/statistics/range?start_date=2026-01-01&end_date=2026-01-13",
-							"host": [
-								"{{base_url}}"
-							],
-							"path": [
-								"api",
-								"admin",
-								"statistics",
-								"range"
-							],
-							"query": [
-								{
-									"key": "start_date",
-									"value": "2026-01-01",
-									"description": "Format: YYYY-MM-DD"
+					"name": "Stored Statistics (from local files)",
+					"description": "Endpoints that read from locally stored statistics files",
+					"item": [
+						{
+							"name": "Get Today's Statistics",
+							"request": {
+								"method": "GET",
+								"header": [
+									{
+										"key": "x-api-key",
+										"value": "{{admin_api_key}}",
+										"type": "text"
+									}
+								],
+								"url": {
+									"raw": "{{base_url}}/api/admin/statistics/today",
+									"host": [
+										"{{base_url}}"
+									],
+									"path": [
+										"api",
+										"admin",
+										"statistics",
+										"today"
+									]
 								},
-								{
-									"key": "end_date",
-									"value": "2026-01-13",
-									"description": "Format: YYYY-MM-DD"
-								}
-							]
+								"description": "Get call outcome statistics for today from local file storage.\n\n**Marlinea's Formula:**\n- answered_calls = calls with \"Plan Type\" OR \"Voicemail Left\" tags\n- transferred_calls = calls with \"Transferred to Agent\" tag\n- connectivity_rate = (transferred_calls / answered_calls) * 100"
+							},
+							"response": []
 						},
-						"description": "Get statistics for a date range. Returns array of daily statistics plus summary."
-					},
-					"response": []
+						{
+							"name": "Get Statistics for Date",
+							"request": {
+								"method": "GET",
+								"header": [
+									{
+										"key": "x-api-key",
+										"value": "{{admin_api_key}}",
+										"type": "text"
+									}
+								],
+								"url": {
+									"raw": "{{base_url}}/api/admin/statistics/date/:date",
+									"host": [
+										"{{base_url}}"
+									],
+									"path": [
+										"api",
+										"admin",
+										"statistics",
+										"date",
+										":date"
+									],
+									"variable": [
+										{
+											"key": "date",
+											"value": "2026-01-24",
+											"description": "Format: YYYY-MM-DD"
+										}
+									]
+								},
+								"description": "Get statistics for a specific date from local file storage. Format: YYYY-MM-DD"
+							},
+							"response": []
+						},
+						{
+							"name": "Get Statistics for Date Range",
+							"request": {
+								"method": "GET",
+								"header": [
+									{
+										"key": "x-api-key",
+										"value": "{{admin_api_key}}",
+										"type": "text"
+									}
+								],
+								"url": {
+									"raw": "{{base_url}}/api/admin/statistics/range?start_date=2026-01-20&end_date=2026-01-25",
+									"host": [
+										"{{base_url}}"
+									],
+									"path": [
+										"api",
+										"admin",
+										"statistics",
+										"range"
+									],
+									"query": [
+										{
+											"key": "start_date",
+											"value": "2026-01-20",
+											"description": "Format: YYYY-MM-DD"
+										},
+										{
+											"key": "end_date",
+											"value": "2026-01-25",
+											"description": "Format: YYYY-MM-DD"
+										}
+									]
+								},
+								"description": "Get statistics for a date range from local file storage. Returns array of daily statistics."
+							},
+							"response": []
+						},
+						{
+							"name": "Get All-Time Statistics",
+							"request": {
+								"method": "GET",
+								"header": [
+									{
+										"key": "x-api-key",
+										"value": "{{admin_api_key}}",
+										"type": "text"
+									}
+								],
+								"url": {
+									"raw": "{{base_url}}/api/admin/statistics/all-time",
+									"host": [
+										"{{base_url}}"
+									],
+									"path": [
+										"api",
+										"admin",
+										"statistics",
+										"all-time"
+									]
+								},
+								"description": "Get aggregated statistics across all tracked dates from local file storage."
+							},
+							"response": []
+						}
+					]
 				},
 				{
-					"name": "Get All-Time Statistics",
-					"request": {
-						"method": "GET",
-						"header": [
-							{
-								"key": "x-api-key",
-								"value": "{{admin_api_key}}",
-								"type": "text"
-							}
-						],
-						"url": {
-							"raw": "{{base_url}}/api/admin/statistics/all-time",
-							"host": [
-								"{{base_url}}"
-							],
-							"path": [
-								"api",
-								"admin",
-								"statistics",
-								"all-time"
-							]
+					"name": "Live Reports (from Bland API)",
+					"description": "Endpoints that fetch fresh data from Bland API in real-time",
+					"item": [
+						{
+							"name": "Live Report - Today",
+							"request": {
+								"method": "GET",
+								"header": [
+									{
+										"key": "x-api-key",
+										"value": "{{admin_api_key}}",
+										"type": "text"
+									}
+								],
+								"url": {
+									"raw": "{{base_url}}/api/admin/calls/stats/live-report",
+									"host": [
+										"{{base_url}}"
+									],
+									"path": [
+										"api",
+										"admin",
+										"calls",
+										"stats",
+										"live-report"
+									]
+								},
+								"description": "Generate live report for TODAY up to the current hour.\n\nFetches fresh data from Bland API and calculates stats using Marlinea's logic.\n\n**Response includes:**\n- current_hour: The hour up to which data was fetched\n- hours_processed: Number of hours fetched\n- hourly_breakdown: Per-hour call counts\n- Stats: total_calls, answered_calls, transferred_calls, connectivity_rate"
+							},
+							"response": []
 						},
-						"description": "Get aggregated statistics across all time. System-wide reporting."
-					},
-					"response": []
+						{
+							"name": "Live Report - Specific Date",
+							"request": {
+								"method": "GET",
+								"header": [
+									{
+										"key": "x-api-key",
+										"value": "{{admin_api_key}}",
+										"type": "text"
+									}
+								],
+								"url": {
+									"raw": "{{base_url}}/api/admin/calls/stats/live-report?date=2026-01-24",
+									"host": [
+										"{{base_url}}"
+									],
+									"path": [
+										"api",
+										"admin",
+										"calls",
+										"stats",
+										"live-report"
+									],
+									"query": [
+										{
+											"key": "date",
+											"value": "2026-01-24",
+											"description": "Date in YYYY-MM-DD format"
+										}
+									]
+								},
+								"description": "Generate report for a HISTORICAL date (all 24 hours).\n\nFetches fresh data from Bland API using parallel hourly chunks to bypass the 1000 record limit."
+							},
+							"response": []
+						},
+						{
+							"name": "Live Report - With Pathway Filter",
+							"request": {
+								"method": "GET",
+								"header": [
+									{
+										"key": "x-api-key",
+										"value": "{{admin_api_key}}",
+										"type": "text"
+									}
+								],
+								"url": {
+									"raw": "{{base_url}}/api/admin/calls/stats/live-report?date=2026-01-24&pathway_id=your-pathway-id",
+									"host": [
+										"{{base_url}}"
+									],
+									"path": [
+										"api",
+										"admin",
+										"calls",
+										"stats",
+										"live-report"
+									],
+									"query": [
+										{
+											"key": "date",
+											"value": "2026-01-24",
+											"description": "Date in YYYY-MM-DD format"
+										},
+										{
+											"key": "pathway_id",
+											"value": "your-pathway-id",
+											"description": "Optional: Filter by specific pathway"
+										}
+									]
+								},
+								"description": "Generate report for a specific date and pathway.\n\nUseful when you have multiple pathways and want stats for just one."
+							},
+							"response": []
+						}
+					]
+				},
+				{
+					"name": "Recalculate Stats (from Bland API)",
+					"description": "Endpoints to recalculate and save statistics from Bland API to local storage",
+					"item": [
+						{
+							"name": "Recalculate - Single Date (Parallel)",
+							"request": {
+								"method": "POST",
+								"header": [
+									{
+										"key": "x-api-key",
+										"value": "{{admin_api_key}}",
+										"type": "text"
+									},
+									{
+										"key": "Content-Type",
+										"value": "application/json",
+										"type": "text"
+									}
+								],
+								"body": {
+									"mode": "raw",
+									"raw": "{\n  \"date\": \"2026-01-24\",\n  \"pathway_id\": null\n}"
+								},
+								"url": {
+									"raw": "{{base_url}}/api/admin/calls/stats/recalculate",
+									"host": [
+										"{{base_url}}"
+									],
+									"path": [
+										"api",
+										"admin",
+										"calls",
+										"stats",
+										"recalculate"
+									]
+								},
+								"description": "Recalculate statistics for a single date using PARALLEL hourly fetching.\n\n**Fast mode** - all 24 API calls run simultaneously.\n\nFetches all calls from Bland API (bypasses 1000 limit using hourly chunks), applies Marlinea's tag-based logic, and saves to local file.\n\n**Marlinea's Logic:**\n- answered_calls = calls with \"Plan Type\" OR \"Voicemail Left\" tags\n- transferred_calls = calls with \"Transferred to Agent\" tag\n- connectivity_rate = (transferred_calls / answered_calls) * 100"
+							},
+							"response": []
+						},
+						{
+							"name": "Recalculate - Single Date (Sequential)",
+							"request": {
+								"method": "POST",
+								"header": [
+									{
+										"key": "x-api-key",
+										"value": "{{admin_api_key}}",
+										"type": "text"
+									},
+									{
+										"key": "Content-Type",
+										"value": "application/json",
+										"type": "text"
+									}
+								],
+								"body": {
+									"mode": "raw",
+									"raw": "{\n  \"date\": \"2026-01-24\",\n  \"pathway_id\": null\n}"
+								},
+								"url": {
+									"raw": "{{base_url}}/api/admin/calls/stats/recalculate-sequential",
+									"host": [
+										"{{base_url}}"
+									],
+									"path": [
+										"api",
+										"admin",
+										"calls",
+										"stats",
+										"recalculate-sequential"
+									]
+								},
+								"description": "Recalculate statistics for a single date using SEQUENTIAL hourly fetching.\n\n**Debug mode** - fetches hour by hour with detailed tracking.\n\n**Response includes:**\n- hourly_breakdown: Array of per-hour stats (count, hitLimit, errors)\n- comparison: Verification data for cross-checking\n\nUseful for:\n- Debugging when parallel mode shows unexpected results\n- Identifying which hours hit the 1000 record limit\n- Tracking errors in specific hour windows"
+							},
+							"response": []
+						},
+						{
+							"name": "Recalculate - Date Range",
+							"request": {
+								"method": "POST",
+								"header": [
+									{
+										"key": "x-api-key",
+										"value": "{{admin_api_key}}",
+										"type": "text"
+									},
+									{
+										"key": "Content-Type",
+										"value": "application/json",
+										"type": "text"
+									}
+								],
+								"body": {
+									"mode": "raw",
+									"raw": "{\n  \"start_date\": \"2026-01-20\",\n  \"end_date\": \"2026-01-25\",\n  \"pathway_id\": null\n}"
+								},
+								"url": {
+									"raw": "{{base_url}}/api/admin/calls/stats/recalculate-range",
+									"host": [
+										"{{base_url}}"
+									],
+									"path": [
+										"api",
+										"admin",
+										"calls",
+										"stats",
+										"recalculate-range"
+									]
+								},
+								"description": "Recalculate statistics for a date range.\n\nProcesses each date sequentially (with 1s delay between dates to avoid rate limiting).\n\n**Warning:** This can take a while for large date ranges. Each date makes 24 API calls to Bland."
+							},
+							"response": []
+						}
+					]
 				}
 			],
-			"description": "Statistical endpoints for call outcome analytics and reporting."
+			"description": "Statistical endpoints for call outcome analytics and reporting.\n\n**Marlinea's Formula:**\n- answered_calls = calls with \"Plan Type\" OR \"Voicemail Left\" tags\n- transferred_calls = calls with \"Transferred to Agent\" tag\n- connectivity_rate = (transferred_calls / answered_calls) * 100\n\n**Endpoint Types:**\n- Stored Statistics: Read from local files (fast, offline)\n- Live Reports: Fetch fresh data from Bland API (real-time)\n- Recalculate: Fetch from Bland and save to local files"
 		},
 		{
 			"name": "5. Admin - Queue Management",
