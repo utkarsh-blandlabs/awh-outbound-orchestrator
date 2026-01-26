@@ -942,22 +942,60 @@ router.post(
 
 /**
  * GET /api/admin/calls/stats/live-report
- * Generate live report for today up to the current hour
+ * Generate live report for today (up to current hour) or a specific date
  * Fetches data from Bland API and calculates stats using Marlinea's logic
  *
- * Query params: pathway_id (optional)
+ * Query params:
+ * - date (optional): YYYY-MM-DD format. If provided, fetches all 24 hours for that date.
+ *                    If not provided, fetches today up to current hour.
+ * - pathway_id (optional): Filter by pathway
  */
 router.get("/calls/stats/live-report", async (req: Request, res: Response) => {
   try {
     const pathway_id = req.query["pathway_id"] as string | undefined;
+    const dateParam = req.query["date"] as string | undefined;
 
     logger.info("Generating live report", {
+      date: dateParam || "today",
       pathway_id,
       triggered_by: (req.headers["x-user"] as string) || "unknown",
     });
 
-    // Fetch calls from Bland up to current hour
-    const result = await blandService.getCallLogsTodayUntilNow(pathway_id);
+    // Fetch calls - either for specific date (all 24h) or today (up to current hour)
+    let result: {
+      date: string;
+      currentHour: number;
+      hoursProcessed: number;
+      calls: Array<{
+        call_id: string;
+        pathway_tags: string[];
+        status: string;
+        answered_by: string;
+        created_at: string;
+      }>;
+      hourlyBreakdown: Array<{
+        hour: number;
+        hourLabel: string;
+        count: number;
+        hitLimit: boolean;
+        error?: string;
+      }>;
+    };
+
+    if (dateParam) {
+      // Historical date - fetch all 24 hours using parallel method
+      const calls = await blandService.getCallLogsByDate(dateParam, pathway_id);
+      result = {
+        date: dateParam,
+        currentHour: 23,
+        hoursProcessed: 24,
+        calls,
+        hourlyBreakdown: [], // Not available for parallel fetch
+      };
+    } else {
+      // Today - fetch up to current hour
+      result = await blandService.getCallLogsTodayUntilNow(pathway_id);
+    }
 
     // Calculate stats using Marlinea's logic
     let answered_calls = 0;

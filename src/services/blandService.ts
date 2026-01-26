@@ -447,7 +447,27 @@ class BlandService {
   }
 
   /**
+   * Processed call object - only fields we need (memory efficient)
+   */
+  private processCallObject(call: any): {
+    call_id: string;
+    pathway_tags: string[];
+    status: string;
+    answered_by: string;
+    created_at: string;
+  } {
+    return {
+      call_id: call.call_id,
+      pathway_tags: call.pathway_tags || [],
+      status: call.status,
+      answered_by: call.answered_by || "",
+      created_at: call.created_at,
+    };
+  }
+
+  /**
    * Fetch a single hour's call logs from Bland API
+   * Returns only necessary fields to minimize memory usage
    * @private
    */
   private async fetchHourlyCallLogs(
@@ -457,7 +477,13 @@ class BlandService {
   ): Promise<{
     hour: number;
     hourLabel: string;
-    calls: any[];
+    calls: Array<{
+      call_id: string;
+      pathway_tags: string[];
+      status: string;
+      answered_by: string;
+      created_at: string;
+    }>;
     count: number;
     hitLimit: boolean;
     error?: string;
@@ -477,14 +503,18 @@ class BlandService {
 
     try {
       const response = await this.client.get("/v1/calls", { params });
-      const calls = response.data.calls || [];
+      const rawCalls = response.data.calls || [];
+
+      // Process immediately to free raw response memory
+      // Only keep the fields we need
+      const calls = rawCalls.map((call: any) => this.processCallObject(call));
 
       return {
         hour,
         hourLabel: `${hourStart}:00`,
         calls,
         count: calls.length,
-        hitLimit: calls.length >= 1000,
+        hitLimit: rawCalls.length >= 1000,
       };
     } catch (error: any) {
       return {
@@ -563,16 +593,11 @@ class BlandService {
           }
         }
 
+        // Calls are already processed - just deduplicate and add
         for (const call of result.calls) {
           if (!seenCallIds.has(call.call_id)) {
             seenCallIds.add(call.call_id);
-            allCalls.push({
-              call_id: call.call_id,
-              pathway_tags: call.pathway_tags || [],
-              status: call.status,
-              answered_by: call.answered_by || "",
-              created_at: call.created_at,
-            });
+            allCalls.push(call); // Already in correct format
           }
         }
       }
@@ -669,16 +694,11 @@ class BlandService {
           error: result.error,
         });
       } else {
+        // Calls are already processed - just deduplicate and add
         for (const call of result.calls) {
           if (!seenCallIds.has(call.call_id)) {
             seenCallIds.add(call.call_id);
-            allCalls.push({
-              call_id: call.call_id,
-              pathway_tags: call.pathway_tags || [],
-              status: call.status,
-              answered_by: call.answered_by || "",
-              created_at: call.created_at,
-            });
+            allCalls.push(call); // Already in correct format
           }
         }
 
@@ -803,16 +823,11 @@ class BlandService {
       });
 
       if (!result.error) {
+        // Calls are already processed - just deduplicate and add
         for (const call of result.calls) {
           if (!seenCallIds.has(call.call_id)) {
             seenCallIds.add(call.call_id);
-            allCalls.push({
-              call_id: call.call_id,
-              pathway_tags: call.pathway_tags || [],
-              status: call.status,
-              answered_by: call.answered_by || "",
-              created_at: call.created_at,
-            });
+            allCalls.push(call); // Already in correct format
           }
         }
       }

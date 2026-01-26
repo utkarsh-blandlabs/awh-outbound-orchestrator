@@ -1,0 +1,312 @@
+{
+  "info": {
+    "_postman_id": "stats-api-collection",
+    "name": "AWH Orchestrator - Statistics API",
+    "description": "API endpoints for call statistics with Marlinea's logic.\n\n## Marlinea's Formula:\n- **answered_calls** = calls with \"Plan Type\" OR \"Voicemail Left\" tags\n- **transferred_calls** = calls with \"Transferred to Agent\" tag\n- **connectivity_rate** = (transferred_calls / answered_calls) * 100",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    {
+      "key": "base_url",
+      "value": "https://your-server.com",
+      "type": "string"
+    },
+    {
+      "key": "api_key",
+      "value": "your-admin-api-key",
+      "type": "string"
+    }
+  ],
+  "item": [
+    {
+      "name": "Statistics",
+      "description": "Endpoints for fetching and recalculating call statistics",
+      "item": [
+        {
+          "name": "Get Today's Stats",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "x-api-key",
+                "value": "{{api_key}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/api/admin/calls/stats/today",
+              "host": ["{{base_url}}"],
+              "path": ["api", "admin", "calls", "stats", "today"]
+            },
+            "description": "Get statistics for today from local file storage."
+          },
+          "response": []
+        },
+        {
+          "name": "Get Stats by Date",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "x-api-key",
+                "value": "{{api_key}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/api/admin/calls/stats/date/2025-01-24",
+              "host": ["{{base_url}}"],
+              "path": ["api", "admin", "calls", "stats", "date", "2025-01-24"]
+            },
+            "description": "Get statistics for a specific date from local file storage."
+          },
+          "response": []
+        },
+        {
+          "name": "Get Stats by Date Range",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "x-api-key",
+                "value": "{{api_key}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/api/admin/calls/stats/range?start_date=2025-01-20&end_date=2025-01-25",
+              "host": ["{{base_url}}"],
+              "path": ["api", "admin", "calls", "stats", "range"],
+              "query": [
+                {
+                  "key": "start_date",
+                  "value": "2025-01-20"
+                },
+                {
+                  "key": "end_date",
+                  "value": "2025-01-25"
+                }
+              ]
+            },
+            "description": "Get statistics for a date range from local file storage."
+          },
+          "response": []
+        },
+        {
+          "name": "Get All-Time Stats",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "x-api-key",
+                "value": "{{api_key}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/api/admin/calls/stats/all-time",
+              "host": ["{{base_url}}"],
+              "path": ["api", "admin", "calls", "stats", "all-time"]
+            },
+            "description": "Get aggregated statistics across all tracked dates."
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "Live Reports (from Bland API)",
+      "description": "Endpoints that fetch fresh data from Bland API",
+      "item": [
+        {
+          "name": "Live Report - Today",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "x-api-key",
+                "value": "{{api_key}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/api/admin/calls/stats/live-report",
+              "host": ["{{base_url}}"],
+              "path": ["api", "admin", "calls", "stats", "live-report"]
+            },
+            "description": "Generate live report for TODAY up to the current hour.\n\nFetches fresh data from Bland API and calculates stats using Marlinea's logic.\n\n**Response includes:**\n- Current hour processed\n- Hourly breakdown\n- Stats: total_calls, answered_calls, transferred_calls, connectivity_rate"
+          },
+          "response": []
+        },
+        {
+          "name": "Live Report - Specific Date",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "x-api-key",
+                "value": "{{api_key}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/api/admin/calls/stats/live-report?date=2025-01-24",
+              "host": ["{{base_url}}"],
+              "path": ["api", "admin", "calls", "stats", "live-report"],
+              "query": [
+                {
+                  "key": "date",
+                  "value": "2025-01-24",
+                  "description": "Date in YYYY-MM-DD format"
+                }
+              ]
+            },
+            "description": "Generate report for a HISTORICAL date (all 24 hours).\n\nFetches fresh data from Bland API using parallel hourly chunks."
+          },
+          "response": []
+        },
+        {
+          "name": "Live Report - With Pathway Filter",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "x-api-key",
+                "value": "{{api_key}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/api/admin/calls/stats/live-report?date=2025-01-24&pathway_id=your-pathway-id",
+              "host": ["{{base_url}}"],
+              "path": ["api", "admin", "calls", "stats", "live-report"],
+              "query": [
+                {
+                  "key": "date",
+                  "value": "2025-01-24",
+                  "description": "Date in YYYY-MM-DD format"
+                },
+                {
+                  "key": "pathway_id",
+                  "value": "your-pathway-id",
+                  "description": "Optional: Filter by specific pathway"
+                }
+              ]
+            },
+            "description": "Generate report for a specific date and pathway."
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "Recalculate Stats",
+      "description": "Endpoints to recalculate and save statistics from Bland API",
+      "item": [
+        {
+          "name": "Recalculate - Single Date (Parallel)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "x-api-key",
+                "value": "{{api_key}}",
+                "type": "text"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"date\": \"2025-01-24\",\n  \"pathway_id\": null\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/admin/calls/stats/recalculate",
+              "host": ["{{base_url}}"],
+              "path": ["api", "admin", "calls", "stats", "recalculate"]
+            },
+            "description": "Recalculate statistics for a single date using PARALLEL hourly fetching.\n\n**Fast mode** - all 24 API calls run simultaneously.\n\nFetches all calls from Bland API, applies Marlinea's tag-based logic, and saves to file."
+          },
+          "response": []
+        },
+        {
+          "name": "Recalculate - Single Date (Sequential)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "x-api-key",
+                "value": "{{api_key}}",
+                "type": "text"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"date\": \"2025-01-24\",\n  \"pathway_id\": null\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/admin/calls/stats/recalculate-sequential",
+              "host": ["{{base_url}}"],
+              "path": ["api", "admin", "calls", "stats", "recalculate-sequential"]
+            },
+            "description": "Recalculate statistics for a single date using SEQUENTIAL hourly fetching.\n\n**Debug mode** - fetches hour by hour with detailed tracking.\n\n**Response includes:**\n- `hourly_breakdown`: Array of per-hour stats\n- `comparison`: Verification data (total from breakdown, hours with errors, hours at limit)"
+          },
+          "response": []
+        },
+        {
+          "name": "Recalculate - Date Range",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "x-api-key",
+                "value": "{{api_key}}",
+                "type": "text"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"start_date\": \"2025-01-20\",\n  \"end_date\": \"2025-01-25\",\n  \"pathway_id\": null\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/admin/calls/stats/recalculate-range",
+              "host": ["{{base_url}}"],
+              "path": ["api", "admin", "calls", "stats", "recalculate-range"]
+            },
+            "description": "Recalculate statistics for a date range.\n\nProcesses each date sequentially (with 1s delay between dates to avoid rate limiting).\n\n**Warning:** This can take a while for large date ranges."
+          },
+          "response": []
+        }
+      ]
+    }
+  ],
+  "event": [
+    {
+      "listen": "prerequest",
+      "script": {
+        "type": "text/javascript",
+        "exec": [""]
+      }
+    },
+    {
+      "listen": "test",
+      "script": {
+        "type": "text/javascript",
+        "exec": [""]
+      }
+    }
+  ]
+}
