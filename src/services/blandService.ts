@@ -447,8 +447,61 @@ class BlandService {
   }
 
   /**
-   * Fetch call logs from Bland API for a specific date
-   * Used for recalculating historical statistics
+   * Fetch a single hour's call logs from Bland API
+   * @private
+   */
+  private async fetchHourlyCallLogs(
+    date: string,
+    hour: number,
+    pathwayId?: string
+  ): Promise<{
+    hour: number;
+    hourLabel: string;
+    calls: any[];
+    count: number;
+    hitLimit: boolean;
+    error?: string;
+  }> {
+    const hourStart = hour.toString().padStart(2, "0");
+    const hourEnd = hour === 23 ? "23:59:59.999" : `${(hour + 1).toString().padStart(2, "0")}:00:00.000`;
+
+    const fromDate = `${date}T${hourStart}:00:00.000Z`;
+    const toDate = `${date}T${hourEnd}Z`;
+
+    const params: Record<string, any> = {
+      limit: 1000,
+      from_date: fromDate,
+      to_date: toDate,
+      ...(pathwayId && { pathway_id: pathwayId }),
+    };
+
+    try {
+      const response = await this.client.get("/v1/calls", { params });
+      const calls = response.data.calls || [];
+
+      return {
+        hour,
+        hourLabel: `${hourStart}:00`,
+        calls,
+        count: calls.length,
+        hitLimit: calls.length >= 1000,
+      };
+    } catch (error: any) {
+      return {
+        hour,
+        hourLabel: `${hourStart}:00`,
+        calls: [],
+        count: 0,
+        hitLimit: false,
+        error: error.message,
+      };
+    }
+  }
+
+  /**
+   * Fetch call logs from Bland API for a specific date (PARALLEL - Fast)
+   * Uses hourly time chunking to bypass Bland API's 1000 call limit.
+   * Makes 24 API calls in parallel for speed.
    *
    * @param date - Date in YYYY-MM-DD format
    * @param pathwayId - Optional pathway ID filter (defaults to config pathway)
@@ -468,63 +521,63 @@ class BlandService {
   > {
     const targetPathwayId = pathwayId || config.bland.pathwayId;
 
-    logger.info("Fetching call logs from Bland", {
+    logger.info("Fetching call logs from Bland (PARALLEL)", {
       date,
       pathway_id: targetPathwayId,
     });
 
+    const allCalls: Array<{
+      call_id: string;
+      pathway_tags: string[];
+      status: string;
+      answered_by: string;
+      created_at: string;
+    }> = [];
+    const seenCallIds = new Set<string>();
+
     try {
-      // Bland API: GET /v1/calls with filters
-      // created_at filter uses ISO date format
-      const startOfDay = `${date}T00:00:00.000Z`;
-      const endOfDay = `${date}T23:59:59.999Z`;
+      // Execute all 24 hours in parallel
+      const hourlyPromises = Array.from({ length: 24 }, (_, hour) =>
+        this.fetchHourlyCallLogs(date, hour, targetPathwayId)
+      );
+      const hourlyResults = await Promise.all(hourlyPromises);
 
-      const allCalls: Array<{
-        call_id: string;
-        pathway_tags: string[];
-        status: string;
-        answered_by: string;
-        created_at: string;
-      }> = [];
-
-      let hasMore = true;
-      let cursor: string | undefined;
-
-      while (hasMore) {
-        const params: Record<string, any> = {
-          limit: 1000, // Max per page
-          from_date: startOfDay,
-          to_date: endOfDay,
-          ...(targetPathwayId && { pathway_id: targetPathwayId }),
-          ...(cursor && { cursor }),
-        };
-
-        const response = await this.client.get("/v1/calls", { params });
-
-        const calls = response.data.calls || [];
-        for (const call of calls) {
-          allCalls.push({
-            call_id: call.call_id,
-            pathway_tags: call.pathway_tags || [],
-            status: call.status,
-            answered_by: call.answered_by || "",
-            created_at: call.created_at,
+      // Aggregate and deduplicate
+      for (const result of hourlyResults) {
+        if (result.error) {
+          logger.error("Failed to fetch calls for hour", {
+            date,
+            hour: result.hourLabel,
+            error: result.error,
           });
+        } else {
+          logger.info("Fetched hourly chunk", {
+            date,
+            hour: result.hourLabel,
+            count: result.count,
+            hitLimit: result.hitLimit,
+          });
+
+          if (result.hitLimit) {
+            logger.warn("Hit 1000 call limit for hour", { date, hour: result.hourLabel });
+          }
         }
 
-        // Check for pagination
-        cursor = response.data.cursor;
-        hasMore = !!cursor && calls.length > 0;
-
-        logger.info("Fetched page of call logs", {
-          date,
-          page_size: calls.length,
-          total_so_far: allCalls.length,
-          has_more: hasMore,
-        });
+        for (const call of result.calls) {
+          if (!seenCallIds.has(call.call_id)) {
+            seenCallIds.add(call.call_id);
+            allCalls.push({
+              call_id: call.call_id,
+              pathway_tags: call.pathway_tags || [],
+              status: call.status,
+              answered_by: call.answered_by || "",
+              created_at: call.created_at,
+            });
+          }
+        }
       }
 
-      logger.info("Finished fetching call logs", {
+      logger.info("Finished fetching call logs (PARALLEL)", {
         date,
         total_calls: allCalls.length,
       });
@@ -534,10 +587,251 @@ class BlandService {
       logger.error("Failed to fetch call logs from Bland", {
         date,
         error: error.message,
-        response: error.response?.data,
       });
       throw new Error(`Failed to fetch call logs: ${error.message}`);
     }
+  }
+
+  /**
+   * Fetch call logs from Bland API for a specific date (SEQUENTIAL - Detailed tracking)
+   * Fetches hour by hour with detailed logging and progress tracking.
+   * Use this for debugging or when you need per-hour visibility.
+   *
+   * @param date - Date in YYYY-MM-DD format
+   * @param pathwayId - Optional pathway ID filter
+   * @param onHourComplete - Optional callback for each hour's progress
+   * @returns Object with calls array and hourly breakdown
+   */
+  async getCallLogsByDateSequential(
+    date: string,
+    pathwayId?: string,
+    onHourComplete?: (hourData: {
+      hour: number;
+      hourLabel: string;
+      count: number;
+      totalSoFar: number;
+      hitLimit: boolean;
+    }) => void
+  ): Promise<{
+    calls: Array<{
+      call_id: string;
+      pathway_tags: string[];
+      status: string;
+      answered_by: string;
+      created_at: string;
+    }>;
+    hourlyBreakdown: Array<{
+      hour: number;
+      hourLabel: string;
+      count: number;
+      hitLimit: boolean;
+      error?: string;
+    }>;
+  }> {
+    const targetPathwayId = pathwayId || config.bland.pathwayId;
+
+    logger.info("Fetching call logs from Bland (SEQUENTIAL)", {
+      date,
+      pathway_id: targetPathwayId,
+    });
+
+    const allCalls: Array<{
+      call_id: string;
+      pathway_tags: string[];
+      status: string;
+      answered_by: string;
+      created_at: string;
+    }> = [];
+    const seenCallIds = new Set<string>();
+    const hourlyBreakdown: Array<{
+      hour: number;
+      hourLabel: string;
+      count: number;
+      hitLimit: boolean;
+      error?: string;
+    }> = [];
+
+    for (let hour = 0; hour < 24; hour++) {
+      const result = await this.fetchHourlyCallLogs(date, hour, targetPathwayId);
+
+      hourlyBreakdown.push({
+        hour: result.hour,
+        hourLabel: result.hourLabel,
+        count: result.count,
+        hitLimit: result.hitLimit,
+        error: result.error,
+      });
+
+      if (result.error) {
+        logger.error("Failed to fetch calls for hour", {
+          date,
+          hour: result.hourLabel,
+          error: result.error,
+        });
+      } else {
+        for (const call of result.calls) {
+          if (!seenCallIds.has(call.call_id)) {
+            seenCallIds.add(call.call_id);
+            allCalls.push({
+              call_id: call.call_id,
+              pathway_tags: call.pathway_tags || [],
+              status: call.status,
+              answered_by: call.answered_by || "",
+              created_at: call.created_at,
+            });
+          }
+        }
+
+        logger.info("Fetched hourly chunk (sequential)", {
+          date,
+          hour: result.hourLabel,
+          count: result.count,
+          totalSoFar: allCalls.length,
+          hitLimit: result.hitLimit,
+        });
+
+        if (result.hitLimit) {
+          logger.warn("Hit 1000 call limit for hour", { date, hour: result.hourLabel });
+        }
+      }
+
+      // Callback for progress tracking
+      if (onHourComplete) {
+        onHourComplete({
+          hour: result.hour,
+          hourLabel: result.hourLabel,
+          count: result.count,
+          totalSoFar: allCalls.length,
+          hitLimit: result.hitLimit,
+        });
+      }
+
+      // Small delay between requests
+      if (hour < 23) {
+        await this.sleep(100);
+      }
+    }
+
+    logger.info("Finished fetching call logs (SEQUENTIAL)", {
+      date,
+      total_calls: allCalls.length,
+    });
+
+    return { calls: allCalls, hourlyBreakdown };
+  }
+
+  /**
+   * Fetch call logs for today up to the current hour (for live reports)
+   * Only fetches completed hours to ensure accurate data.
+   *
+   * @param pathwayId - Optional pathway ID filter
+   * @returns Object with calls, hourly breakdown, and metadata
+   */
+  async getCallLogsTodayUntilNow(pathwayId?: string): Promise<{
+    date: string;
+    currentHour: number;
+    hoursProcessed: number;
+    calls: Array<{
+      call_id: string;
+      pathway_tags: string[];
+      status: string;
+      answered_by: string;
+      created_at: string;
+    }>;
+    hourlyBreakdown: Array<{
+      hour: number;
+      hourLabel: string;
+      count: number;
+      hitLimit: boolean;
+      error?: string;
+    }>;
+  }> {
+    // Get current time in EST (same timezone as statistics service)
+    const now = new Date();
+    const estFormatter = new Intl.DateTimeFormat("en-CA", {
+      timeZone: "America/New_York",
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+    });
+    const hourFormatter = new Intl.DateTimeFormat("en-US", {
+      timeZone: "America/New_York",
+      hour: "numeric",
+      hour12: false,
+    });
+
+    const date = estFormatter.format(now);
+    const currentHour = parseInt(hourFormatter.format(now), 10);
+    const targetPathwayId = pathwayId || config.bland.pathwayId;
+
+    logger.info("Fetching call logs for today until current hour", {
+      date,
+      currentHour,
+      pathway_id: targetPathwayId,
+    });
+
+    const allCalls: Array<{
+      call_id: string;
+      pathway_tags: string[];
+      status: string;
+      answered_by: string;
+      created_at: string;
+    }> = [];
+    const seenCallIds = new Set<string>();
+    const hourlyBreakdown: Array<{
+      hour: number;
+      hourLabel: string;
+      count: number;
+      hitLimit: boolean;
+      error?: string;
+    }> = [];
+
+    // Fetch hours 0 to currentHour (inclusive) in parallel
+    const hoursToFetch = currentHour + 1;
+    const hourlyPromises = Array.from({ length: hoursToFetch }, (_, hour) =>
+      this.fetchHourlyCallLogs(date, hour, targetPathwayId)
+    );
+    const hourlyResults = await Promise.all(hourlyPromises);
+
+    for (const result of hourlyResults) {
+      hourlyBreakdown.push({
+        hour: result.hour,
+        hourLabel: result.hourLabel,
+        count: result.count,
+        hitLimit: result.hitLimit,
+        error: result.error,
+      });
+
+      if (!result.error) {
+        for (const call of result.calls) {
+          if (!seenCallIds.has(call.call_id)) {
+            seenCallIds.add(call.call_id);
+            allCalls.push({
+              call_id: call.call_id,
+              pathway_tags: call.pathway_tags || [],
+              status: call.status,
+              answered_by: call.answered_by || "",
+              created_at: call.created_at,
+            });
+          }
+        }
+      }
+    }
+
+    logger.info("Finished fetching call logs until current hour", {
+      date,
+      currentHour,
+      hoursProcessed: hoursToFetch,
+      total_calls: allCalls.length,
+    });
+
+    return {
+      date,
+      currentHour,
+      hoursProcessed: hoursToFetch,
+      calls: allCalls,
+      hourlyBreakdown,
+    };
   }
 }
 

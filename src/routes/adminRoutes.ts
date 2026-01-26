@@ -7,6 +7,7 @@ import { Router, Request, Response } from "express";
 import { CallStateManager } from "../services/callStateManager";
 import { blandRateLimiter } from "../utils/rateLimiter";
 import { statisticsService } from "../services/statisticsService";
+import { blandService } from "../services/blandService";
 import { schedulerService } from "../services/schedulerService";
 import { dailyCallTracker } from "../services/dailyCallTrackerService";
 import { answeringMachineTracker } from "../services/answeringMachineTrackerService";
@@ -929,6 +930,200 @@ router.post(
       });
     } catch (error: any) {
       logger.error("Error recalculating stats for range", {
+        error: error.message,
+      });
+      res.status(500).json({
+        success: false,
+        error: error.message,
+      });
+    }
+  }
+);
+
+/**
+ * GET /api/admin/calls/stats/live-report
+ * Generate live report for today up to the current hour
+ * Fetches data from Bland API and calculates stats using Marlinea's logic
+ *
+ * Query params: pathway_id (optional)
+ */
+router.get("/calls/stats/live-report", async (req: Request, res: Response) => {
+  try {
+    const pathway_id = req.query["pathway_id"] as string | undefined;
+
+    logger.info("Generating live report", {
+      pathway_id,
+      triggered_by: (req.headers["x-user"] as string) || "unknown",
+    });
+
+    // Fetch calls from Bland up to current hour
+    const result = await blandService.getCallLogsTodayUntilNow(pathway_id);
+
+    // Calculate stats using Marlinea's logic
+    let answered_calls = 0;
+    let transferred_calls = 0;
+    let voicemail_calls = 0;
+    let no_answer_calls = 0;
+
+    for (const call of result.calls) {
+      // Normalize tags
+      const tags = (call.pathway_tags || [])
+        .map((t: any) => {
+          if (typeof t === "string") return t.toLowerCase();
+          if (t && typeof t === "object" && t.name) return t.name.toLowerCase();
+          return null;
+        })
+        .filter((t: any): t is string => t !== null);
+
+      // Marlinea's logic for answered
+      const hasPlanTypeTag = tags.some((tag: string) => tag.includes("plan type"));
+      const hasVoicemailLeftTag = tags.some((tag: string) => tag.includes("voicemail left"));
+      if (hasPlanTypeTag || hasVoicemailLeftTag) {
+        answered_calls++;
+      }
+
+      // Marlinea's logic for transferred
+      const hasTransferredTag = tags.some((tag: string) => tag.includes("transferred to agent"));
+      if (hasTransferredTag) {
+        transferred_calls++;
+      }
+
+      // Track other outcomes
+      const answeredBy = (call.answered_by || "").toLowerCase();
+      if (answeredBy === "voicemail" || answeredBy === "machine") {
+        voicemail_calls++;
+      }
+      if (answeredBy === "no-answer" || answeredBy === "no_answer") {
+        no_answer_calls++;
+      }
+    }
+
+    // Calculate rates
+    const total_calls = result.calls.length;
+    const connectivity_rate = answered_calls > 0
+      ? Math.round((transferred_calls / answered_calls) * 10000) / 100
+      : 0;
+    const transfer_rate = connectivity_rate; // Same formula
+
+    res.json({
+      success: true,
+      report: {
+        date: result.date,
+        current_hour: result.currentHour,
+        hours_processed: result.hoursProcessed,
+        generated_at: new Date().toISOString(),
+        stats: {
+          total_calls,
+          answered_calls,
+          transferred_calls,
+          voicemail_calls,
+          no_answer_calls,
+          connectivity_rate,
+          transfer_rate,
+        },
+        hourly_breakdown: result.hourlyBreakdown,
+      },
+    });
+  } catch (error: any) {
+    logger.error("Error generating live report", { error: error.message });
+    res.status(500).json({
+      success: false,
+      error: error.message,
+    });
+  }
+});
+
+/**
+ * POST /api/admin/calls/stats/recalculate-sequential
+ * Recalculate statistics using sequential hourly fetching
+ * Provides detailed hourly breakdown for debugging/verification
+ *
+ * Body: { date: "YYYY-MM-DD", pathway_id?: string }
+ */
+router.post(
+  "/calls/stats/recalculate-sequential",
+  async (req: Request, res: Response) => {
+    try {
+      const { date, pathway_id } = req.body;
+
+      if (!date) {
+        return res.status(400).json({
+          success: false,
+          error: "date is required (YYYY-MM-DD format)",
+        });
+      }
+
+      logger.info("Recalculating stats (SEQUENTIAL)", {
+        date,
+        pathway_id,
+        triggered_by: (req.headers["x-user"] as string) || "unknown",
+      });
+
+      // Fetch calls sequentially with hourly breakdown
+      const result = await blandService.getCallLogsByDateSequential(date, pathway_id);
+
+      // Calculate stats using Marlinea's logic
+      let answered_calls = 0;
+      let transferred_calls = 0;
+      let voicemail_calls = 0;
+      let no_answer_calls = 0;
+
+      for (const call of result.calls) {
+        const tags = (call.pathway_tags || [])
+          .map((t: any) => {
+            if (typeof t === "string") return t.toLowerCase();
+            if (t && typeof t === "object" && t.name) return t.name.toLowerCase();
+            return null;
+          })
+          .filter((t: any): t is string => t !== null);
+
+        const hasPlanTypeTag = tags.some((tag: string) => tag.includes("plan type"));
+        const hasVoicemailLeftTag = tags.some((tag: string) => tag.includes("voicemail left"));
+        if (hasPlanTypeTag || hasVoicemailLeftTag) {
+          answered_calls++;
+        }
+
+        const hasTransferredTag = tags.some((tag: string) => tag.includes("transferred to agent"));
+        if (hasTransferredTag) {
+          transferred_calls++;
+        }
+
+        const answeredBy = (call.answered_by || "").toLowerCase();
+        if (answeredBy === "voicemail" || answeredBy === "machine") {
+          voicemail_calls++;
+        }
+        if (answeredBy === "no-answer" || answeredBy === "no_answer") {
+          no_answer_calls++;
+        }
+      }
+
+      const total_calls = result.calls.length;
+      const connectivity_rate = answered_calls > 0
+        ? Math.round((transferred_calls / answered_calls) * 10000) / 100
+        : 0;
+
+      res.json({
+        success: true,
+        message: "Statistics calculated (sequential mode)",
+        date,
+        stats: {
+          total_calls,
+          answered_calls,
+          transferred_calls,
+          voicemail_calls,
+          no_answer_calls,
+          connectivity_rate,
+        },
+        hourly_breakdown: result.hourlyBreakdown,
+        comparison: {
+          note: "Use this to verify against parallel fetch or Marlinea's numbers",
+          total_from_breakdown: result.hourlyBreakdown.reduce((sum, h) => sum + h.count, 0),
+          hours_with_errors: result.hourlyBreakdown.filter(h => h.error).length,
+          hours_at_limit: result.hourlyBreakdown.filter(h => h.hitLimit).length,
+        },
+      });
+    } catch (error: any) {
+      logger.error("Error recalculating stats (sequential)", {
         error: error.message,
       });
       res.status(500).json({
