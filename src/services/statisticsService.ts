@@ -212,8 +212,10 @@ class StatisticsService {
     // Categorize by outcome
     const normalizedOutcome = outcome.toLowerCase();
 
-    // Normalize pathway tags for matching (case-insensitive)
-    const tags = (pathway_tags || []).map((t) => t.toLowerCase());
+    // Normalize pathway tags for matching (filter out null/undefined and convert to lowercase)
+    const tags = (pathway_tags || [])
+      .filter((t): t is string => typeof t === "string")
+      .map((t) => t.toLowerCase());
 
     // ============================================================================
     // MARLINEA'S LOGIC FOR ANSWERED CALLS:
@@ -368,8 +370,10 @@ class StatisticsService {
         stats.total_calls++;
         stats.completed_calls++;
 
-        // Normalize tags for matching
-        const tags = call.pathway_tags.map((t) => t.toLowerCase());
+        // Normalize tags for matching (filter out null/undefined and convert to lowercase)
+        const tags = (call.pathway_tags || [])
+          .filter((t): t is string => typeof t === "string")
+          .map((t) => t.toLowerCase());
 
         // MARLINEA'S LOGIC: answered = "Plan Type" OR "Voicemail Left" tag
         const hasPlanTypeTag = tags.some((tag) => tag.includes("plan type"));
