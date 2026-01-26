@@ -207,10 +207,10 @@ async function processCallCompletion(
         (transcript as any).error_message || "Call failed"
       );
     } else {
+      // Pass pathway_tags to match Marlinea's Bland filter logic for answered/transferred counts
       statisticsService.recordCallComplete(
         transcript.outcome,
-        transcript.answered_by,
-        transcript.transcript // Pass full transcript for voicemail detection
+        transcript.pathway_tags // Use pathway tags for accurate filtering
       );
     }
 
@@ -604,10 +604,10 @@ async function processInboundCall(
     }
 
     // Step 5: Record statistics
+    // Pass pathway_tags to match Marlinea's Bland filter logic for answered/transferred counts
     statisticsService.recordCallComplete(
       transcript.outcome,
-      transcript.answered_by,
-      transcript.transcript // Pass full transcript for voicemail detection
+      transcript.pathway_tags // Use pathway tags for accurate filtering
     );
 
     // Step 6: Record call completion in daily tracker
@@ -825,11 +825,10 @@ function determineOutcome(raw: any): CallOutcome {
     return CallOutcome.NO_ANSWER;
   }
 
-  // Priority 3: Check for busy
+  // Priority 3: Check for busy (only explicit busy signals, not tags)
   if (
     answeredBy === "busy" ||
-    raw.status === "busy" ||
-    tagString.includes("busy")
+    raw.status === "busy"
   ) {
     return CallOutcome.BUSY;
   }
