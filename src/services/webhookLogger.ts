@@ -42,6 +42,7 @@ class WebhookLoggerService {
   private maxLogsInMemory: number = 10000; // Limit memory usage
   private lastSaveTime: number = 0;
   private saveIntervalMs: number = 60000; // Save every 60 seconds instead of every request
+  private flushIntervalId: NodeJS.Timeout | null = null; // MEMORY LEAK FIX: Store interval ID
 
   constructor() {
     this.dataDir = path.join(__dirname, "../../data/webhook-logs");
@@ -60,8 +61,9 @@ class WebhookLoggerService {
     });
 
     // Periodic save to reduce write frequency
+    // MEMORY LEAK FIX: Store interval ID so it can be cleared on shutdown
     if (this.enabled) {
-      setInterval(() => this.flushToDisk(), this.saveIntervalMs);
+      this.flushIntervalId = setInterval(() => this.flushToDisk(), this.saveIntervalMs);
     }
   }
 
@@ -399,6 +401,21 @@ class WebhookLoggerService {
     }
 
     return results;
+  }
+
+  /**
+   * MEMORY LEAK FIX: Stop the periodic flush interval
+   * Called during graceful shutdown to prevent memory leaks
+   */
+  stop(): void {
+    if (this.flushIntervalId) {
+      clearInterval(this.flushIntervalId);
+      this.flushIntervalId = null;
+      logger.info("Webhook logger flush interval stopped");
+    }
+
+    // Flush any remaining logs to disk before shutdown
+    this.flushToDisk();
   }
 }
 

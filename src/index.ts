@@ -241,6 +241,9 @@ function gracefulShutdown(signal: string): void {
     // Import services for cleanup
     const { redialQueueService } = require("./services/redialQueueService");
     const { answeringMachineTrackerService } = require("./services/answeringMachineTrackerService");
+    const { webhookLogger } = require("./services/webhookLogger");
+    const { smsSchedulerService } = require("./services/smsSchedulerService");
+    const { queueProcessorService } = require("./services/queueProcessorService");
 
     // Stop redial queue processor and timers
     redialQueueService.stopProcessor();
@@ -249,6 +252,18 @@ function gracefulShutdown(signal: string): void {
     // Stop AM tracker flush scheduler
     answeringMachineTrackerService.stopFlushScheduler();
     logger.info("AM tracker flush scheduler stopped");
+
+    // MEMORY LEAK FIX: Stop webhook logger flush interval
+    webhookLogger.stop();
+    logger.info("Webhook logger stopped");
+
+    // Stop SMS scheduler
+    smsSchedulerService.stop();
+    logger.info("SMS scheduler stopped");
+
+    // Stop queue processor
+    queueProcessorService.stop();
+    logger.info("Queue processor stopped");
 
     logger.info("All services stopped successfully");
   } catch (error: any) {
