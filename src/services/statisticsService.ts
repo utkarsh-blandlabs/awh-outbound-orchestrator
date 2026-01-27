@@ -5,7 +5,6 @@
 import fs from "fs";
 import path from "path";
 import { logger } from "../utils/logger";
-import { blandService } from "./blandService";
 
 interface DailyStats {
   date: string; // YYYY-MM-DD
@@ -348,148 +347,50 @@ class StatisticsService {
   }
 
   /**
-   * Recalculate statistics for a specific date by fetching call logs from Bland API
-   * Uses Marlinea's logic:
-   * - answered_calls = calls with "Plan Type" OR "Voicemail Left" tags
-   * - transferred_calls = calls with "Transferred to Agent" tag
-   * - connectivity_rate = transferred_calls / answered_calls * 100
+   * DEPRECATED: Recalculate statistics from Bland API
    *
-   * @param date - Date in YYYY-MM-DD format
-   * @param pathwayId - Optional pathway ID filter
-   * @returns Updated statistics for the date
+   * This method is disabled because:
+   * 1. We track statistics in real-time from webhooks (more accurate)
+   * 2. Bland API can be unreliable/slow
+   * 3. Reduces external API dependencies
+   *
+   * All stats are now tracked exclusively from webhook events using recordCallComplete()
+   *
+   * @deprecated Use webhook-based tracking instead
    */
   async recalculateStatsFromBland(
     date: string,
     pathwayId?: string
   ): Promise<DailyStats> {
-    logger.info("Recalculating statistics from Bland API", { date, pathwayId });
+    logger.warn("DEPRECATED: recalculateStatsFromBland called - this method is disabled", {
+      date,
+      pathwayId,
+      message: "Statistics are now tracked exclusively from webhooks. Use getStatsByDate() to view current stats.",
+    });
 
-    try {
-      // Fetch call logs from Bland
-      const calls = await blandService.getCallLogsByDate(date, pathwayId);
-
-      // Initialize fresh stats
-      const stats = this.initializeStats(date);
-
-      // Process each call using Marlinea's logic
-      for (const call of calls) {
-        stats.total_calls++;
-        stats.completed_calls++;
-
-        // Normalize tags for matching
-        // Bland API returns tags as objects: [{name: "Tag Name", color: "#hex"}]
-        // We need to extract the name property and convert to lowercase
-        const tags = (call.pathway_tags || [])
-          .map((t: any) => {
-            if (typeof t === "string") return t.toLowerCase();
-            if (t && typeof t === "object" && t.name) return t.name.toLowerCase();
-            return null;
-          })
-          .filter((t): t is string => t !== null);
-
-        // MARLINEA'S LOGIC: answered = "Plan Type" OR "Voicemail Left" tag
-        const hasPlanTypeTag = tags.some((tag) => tag.includes("plan type"));
-        const hasVoicemailLeftTag = tags.some((tag) =>
-          tag.includes("voicemail left")
-        );
-
-        if (hasPlanTypeTag || hasVoicemailLeftTag) {
-          stats.answered_calls++;
-        }
-
-        // MARLINEA'S LOGIC: transferred = "Transferred to Agent" tag
-        const hasTransferredTag = tags.some((tag) =>
-          tag.includes("transferred to agent")
-        );
-
-        if (hasTransferredTag) {
-          stats.transferred_calls++;
-        }
-
-        // Track other stats based on answered_by for internal reporting
-        const answeredBy = call.answered_by.toLowerCase();
-        if (answeredBy === "voicemail" || answeredBy === "machine") {
-          stats.voicemail_calls++;
-        }
-        if (answeredBy === "no-answer" || answeredBy === "no_answer") {
-          stats.no_answer_calls++;
-        }
-        if (answeredBy === "busy") {
-          stats.busy_calls++;
-        }
-      }
-
-      // Calculate rates and save
-      const finalStats = this.calculateRates(stats);
-      this.saveStats(finalStats);
-
-      logger.info("Statistics recalculated successfully", {
-        date,
-        total_calls: finalStats.total_calls,
-        answered_calls: finalStats.answered_calls,
-        transferred_calls: finalStats.transferred_calls,
-        connectivity_rate: finalStats.connectivity_rate,
-      });
-
-      return finalStats;
-    } catch (error: any) {
-      logger.error("Failed to recalculate statistics", {
-        date,
-        error: error.message,
-      });
-      throw error;
-    }
+    // Return current stats from local files instead of fetching from Bland
+    return this.getStatsByDate(date);
   }
 
   /**
-   * Recalculate statistics for a date range
+   * DEPRECATED: Recalculate statistics for date range from Bland API
    *
-   * @param startDate - Start date in YYYY-MM-DD format
-   * @param endDate - End date in YYYY-MM-DD format
-   * @param pathwayId - Optional pathway ID filter
-   * @returns Array of updated statistics for each date
+   * @deprecated Use webhook-based tracking instead
    */
   async recalculateStatsForDateRange(
     startDate: string,
     endDate: string,
     pathwayId?: string
   ): Promise<DailyStats[]> {
-    logger.info("Recalculating statistics for date range", {
+    logger.warn("DEPRECATED: recalculateStatsForDateRange called - this method is disabled", {
       startDate,
       endDate,
       pathwayId,
+      message: "Statistics are now tracked exclusively from webhooks. Use getStatsByDateRange() instead.",
     });
 
-    const results: DailyStats[] = [];
-    const start = new Date(startDate);
-    const end = new Date(endDate);
-
-    for (let d = new Date(start); d <= end; d.setDate(d.getDate() + 1)) {
-      const dateStr = d.toISOString().split("T")[0];
-      if (dateStr) {
-        try {
-          const stats = await this.recalculateStatsFromBland(dateStr, pathwayId);
-          results.push(stats);
-
-          // Small delay to avoid rate limiting
-          await new Promise((resolve) => setTimeout(resolve, 1000));
-        } catch (error: any) {
-          logger.error("Failed to recalculate stats for date", {
-            date: dateStr,
-            error: error.message,
-          });
-          // Continue with next date even if one fails
-        }
-      }
-    }
-
-    logger.info("Finished recalculating statistics for date range", {
-      startDate,
-      endDate,
-      dates_processed: results.length,
-    });
-
-    return results;
+    // Return current stats from local files instead of fetching from Bland
+    return this.getStatsByDateRange(startDate, endDate);
   }
 }
 
