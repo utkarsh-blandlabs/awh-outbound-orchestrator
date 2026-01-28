@@ -5,11 +5,10 @@
  */
 
 import express, { Request, Response } from "express";
-import { logger } from "../config/logger";
+import { logger } from "../utils/logger";
 import { readFileSync, readdirSync, existsSync } from "fs";
 import { join } from "path";
 import { redialQueueService } from "../services/redialQueueService";
-import { dailyCallTrackerService } from "../services/dailyCallTrackerService";
 
 const router = express.Router();
 
@@ -299,18 +298,20 @@ async function queryDailyCalls(params: BulkQueryParams): Promise<any[]> {
 
         // data is a map of phone_number -> DailyCallRecord
         for (const [phone, record] of Object.entries(data as any)) {
+          const dailyRecord = record as any;
+
           // Filter by outcome
-          if (params.outcome && record.final_outcome !== params.outcome) {
+          if (params.outcome && dailyRecord.final_outcome !== params.outcome) {
             continue;
           }
 
           results.push({
             phone_number: phone,
-            lead_ids: record.lead_ids,
-            final_outcome: record.final_outcome,
-            attempts: record.calls?.length || 0,
+            lead_ids: dailyRecord.lead_ids,
+            final_outcome: dailyRecord.final_outcome,
+            attempts: dailyRecord.calls?.length || 0,
             date: fileDate,
-            last_call_timestamp: record.last_call_timestamp
+            last_call_timestamp: dailyRecord.last_call_timestamp
           });
         }
       } catch (err: any) {
