@@ -199,6 +199,29 @@ router.get("/calls/stats", (req: Request, res: Response) => {
 });
 
 /**
+ * GET /api/admin/calls/today
+ * Get all calls made today
+ * NOTE: This MUST be before /calls/:call_id to avoid "today" being treated as call_id
+ */
+router.get("/calls/today", (req: Request, res: Response) => {
+  try {
+    const records = dailyCallTracker.getAllRecords();
+
+    res.json({
+      success: true,
+      total_numbers: records.length,
+      records,
+    });
+  } catch (error: any) {
+    logger.error("Error fetching today's calls", { error: error.message });
+    res.status(500).json({
+      success: false,
+      error: error.message,
+    });
+  }
+});
+
+/**
  * GET /api/admin/calls/:call_id
  * Returns details for a specific call
  */
@@ -776,28 +799,6 @@ router.get("/calls/history/:phoneNumber", (req: Request, res: Response) => {
     });
   } catch (error: any) {
     logger.error("Error fetching call history", { error: error.message });
-    res.status(500).json({
-      success: false,
-      error: error.message,
-    });
-  }
-});
-
-/**
- * GET /api/admin/calls/today
- * Get all calls made today
- */
-router.get("/calls/today", (req: Request, res: Response) => {
-  try {
-    const records = dailyCallTracker.getAllRecords();
-
-    res.json({
-      success: true,
-      total_numbers: records.length,
-      records,
-    });
-  } catch (error: any) {
-    logger.error("Error fetching today's calls", { error: error.message });
     res.status(500).json({
       success: false,
       error: error.message,
