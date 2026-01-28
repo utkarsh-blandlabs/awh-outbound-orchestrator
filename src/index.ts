@@ -15,6 +15,8 @@ import blocklistRouter from "./routes/blocklistRoutes";
 import webhookLogRouter from "./routes/webhookLogRoutes";
 import reconciliationRouter from "./routes/reconciliationRoutes";
 import dailyReportRouter from "./routes/dailyReportRoutes";
+import bulkOperationsRouter from "./routes/bulkOperationsRoutes";
+import blandConfigRouter from "./routes/blandConfigRoutes";
 import { versionService } from "./services/versionService";
 
 // Import services (they auto-start in their constructors)
@@ -158,6 +160,8 @@ app.use("/api/admin/blocklist", blocklistRouter);
 app.use("/api/admin/webhook-logs", webhookLogRouter);
 app.use("/api/admin/reconciliation", reconciliationRouter);
 app.use("/api/admin/daily-report", dailyReportRouter);
+app.use("/api/admin/bulk", bulkOperationsRouter);
+app.use("/api/admin/bland-config", blandConfigRouter);
 
 // 404 handler
 app.use((req: Request, res: Response) => {
