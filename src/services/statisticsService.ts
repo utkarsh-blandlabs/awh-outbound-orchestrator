@@ -223,16 +223,20 @@ class StatisticsService {
       .filter((t): t is string => t !== null);
 
     // ============================================================================
-    // MARLINEA'S LOGIC FOR ANSWERED CALLS:
-    // A call is "answered" if it has EITHER:
-    // - "Plan Type" tag (human engaged enough to discuss plan), OR
-    // - "Voicemail Left" tag (successfully left a voicemail)
-    // This matches the Bland filter: Tags includes "Plan Type" OR "Voicemail Left"
+    // ANSWERED CALLS LOGIC:
+    // A call is "answered" ONLY if a human actually picked up and engaged.
+    // This means ONLY calls with "Plan Type" tag count as answered.
+    // Voicemail Left does NOT count as answered (person didn't pick up).
+    //
+    // answered_calls = human answered and engaged (Plan Type tag)
+    // voicemail_calls = went to voicemail (tracked separately below)
     // ============================================================================
     const hasPlanTypeTag = tags.some((tag) => tag.includes("plan type"));
     const hasVoicemailLeftTag = tags.some((tag) => tag.includes("voicemail left"));
 
-    if (hasPlanTypeTag || hasVoicemailLeftTag) {
+    // Only count as answered if human engaged (Plan Type)
+    // Do NOT count voicemail as answered
+    if (hasPlanTypeTag) {
       stats.answered_calls++;
     }
 
@@ -280,6 +284,8 @@ class StatisticsService {
       total_calls: stats.total_calls,
       answered_calls: stats.answered_calls,
       transferred_calls: stats.transferred_calls,
+      voicemail_calls: stats.voicemail_calls,
+      note: "answered_calls = Plan Type tag ONLY (human engaged), voicemail NOT counted as answered",
     });
   }
 
