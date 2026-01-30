@@ -49,6 +49,9 @@ interface LeadNumberMapping {
   last_call_at: number;
 }
 
+// Maximum number of lead mappings to keep in memory
+const MAX_LEAD_MAPPINGS = 50000;
+
 // Outcomes that count as a "pickup" (human was reached)
 const PICKUP_OUTCOMES = new Set([
   CallOutcome.TRANSFERRED,
@@ -127,12 +130,27 @@ class NumberPoolService {
   }
 
   /**
-   * Ensure all pool numbers have performance entries
+   * Ensure all pool numbers have performance entries.
+   * Also removes stale entries for numbers no longer in the pool config
+   * to prevent leaked data from accumulating in memory and on disk.
    */
   private initializePoolNumbers(): void {
+    const poolSet = new Set(config.bland.fromPool);
+
+    // Add entries for new pool numbers
     for (const number of config.bland.fromPool) {
       if (!this.performance.has(number)) {
         this.performance.set(number, this.createEmptyPerformance(number));
+      }
+    }
+
+    // Remove entries for numbers no longer in the pool
+    for (const [number] of this.performance) {
+      if (!poolSet.has(number)) {
+        this.performance.delete(number);
+        logger.info("Removed stale performance entry for number no longer in pool", {
+          number,
+        });
       }
     }
   }
@@ -166,11 +184,26 @@ class NumberPoolService {
         const data = fs.readFileSync(this.performanceFile, "utf-8");
         const parsed = JSON.parse(data);
         if (Array.isArray(parsed)) {
+          let loaded = 0;
+          let skipped = 0;
           for (const entry of parsed) {
+            // Validate required fields
+            if (
+              !entry ||
+              typeof entry.number !== "string" ||
+              !Array.isArray(entry.calls) ||
+              !entry.stats ||
+              typeof entry.stats.total_calls !== "number"
+            ) {
+              skipped++;
+              continue;
+            }
             this.performance.set(entry.number, entry);
+            loaded++;
           }
           logger.info("Loaded number pool performance data", {
-            count: this.performance.size,
+            loaded,
+            skipped,
           });
         }
       }
@@ -187,13 +220,32 @@ class NumberPoolService {
         const data = fs.readFileSync(this.mappingsFile, "utf-8");
         const parsed = JSON.parse(data);
         if (Array.isArray(parsed)) {
+          let loaded = 0;
+          let skipped = 0;
           for (const entry of parsed) {
+            // Validate required fields
+            if (
+              !entry ||
+              typeof entry.lead_id !== "string" ||
+              typeof entry.phone_number !== "string" ||
+              typeof entry.call_count !== "number"
+            ) {
+              skipped++;
+              continue;
+            }
             const key = `${entry.lead_id}:${entry.phone_number}`;
             this.leadMappings.set(key, entry);
+            loaded++;
           }
           logger.info("Loaded lead-number mappings", {
-            count: this.leadMappings.size,
+            loaded,
+            skipped,
           });
+
+          // Enforce cap on loaded data
+          if (this.leadMappings.size > MAX_LEAD_MAPPINGS) {
+            this.evictOldestMappings();
+          }
         }
       }
     } catch (error: any) {
@@ -294,10 +346,11 @@ class NumberPoolService {
     }
 
     // Calculate failure streak from most recent calls
+    // Calls array is always in chronological order (push-only, filter/slice preserve order)
+    // so we iterate backwards — O(k) where k = streak length, zero allocations
     let failureStreak = 0;
-    const sortedCalls = [...calls].sort((a, b) => b.timestamp - a.timestamp);
-    for (const call of sortedCalls) {
-      if (PICKUP_OUTCOMES.has(call.outcome as CallOutcome)) {
+    for (let i = calls.length - 1; i >= 0; i--) {
+      if (PICKUP_OUTCOMES.has(calls[i]!.outcome as CallOutcome)) {
         break;
       }
       failureStreak++;
@@ -508,7 +561,7 @@ class NumberPoolService {
     phoneNumber: string,
     leadId: string
   ): void {
-    if (!fromNumber) return;
+    if (!fromNumber || !outcome) return;
 
     // Ensure performance entry exists
     if (!this.performance.has(fromNumber)) {
@@ -537,12 +590,14 @@ class NumberPoolService {
     // Check cooldown trigger
     this.checkCooldown(perf, now);
 
-    // Update lead mapping
-    const isPickup = PICKUP_OUTCOMES.has(outcome as CallOutcome);
-    this.updateMapping(leadId, phoneNumber, {
-      last_call_from: fromNumber,
-      was_pickup: isPickup,
-    });
+    // Update lead mapping (skip if lead info is missing)
+    if (leadId && phoneNumber) {
+      const isPickup = PICKUP_OUTCOMES.has(outcome as CallOutcome);
+      this.updateMapping(leadId, phoneNumber, {
+        last_call_from: fromNumber,
+        was_pickup: isPickup,
+      });
+    }
 
     logger.info("Number pool outcome recorded", {
       from_number: fromNumber,
@@ -654,6 +709,41 @@ class NumberPoolService {
     }
 
     this.leadMappings.set(key, mapping);
+
+    // Enforce in-memory cap to prevent unbounded growth
+    if (this.leadMappings.size > MAX_LEAD_MAPPINGS) {
+      this.evictOldestMappings();
+    }
+  }
+
+  /**
+   * Evict oldest lead mappings when the map exceeds MAX_LEAD_MAPPINGS.
+   * First tries pruning expired entries; if still over cap, removes oldest by last_call_at.
+   */
+  private evictOldestMappings(): void {
+    // First try pruning expired
+    this.pruneExpiredMappings();
+
+    if (this.leadMappings.size <= MAX_LEAD_MAPPINGS) {
+      return;
+    }
+
+    // Still over cap — evict oldest entries until at 80% capacity
+    const targetSize = Math.floor(MAX_LEAD_MAPPINGS * 0.8);
+    const entries = Array.from(this.leadMappings.entries()).sort(
+      (a, b) => a[1].last_call_at - b[1].last_call_at
+    );
+
+    const toRemove = entries.length - targetSize;
+    for (let i = 0; i < toRemove; i++) {
+      this.leadMappings.delete(entries[i]![0]);
+    }
+
+    logger.info("Evicted old lead mappings due to memory cap", {
+      removed: toRemove,
+      remaining: this.leadMappings.size,
+      cap: MAX_LEAD_MAPPINGS,
+    });
   }
 
   // ============================================================================
@@ -676,19 +766,22 @@ class NumberPoolService {
     total_mappings: number;
   } {
     const now = Date.now();
+    const defaultStats: NumberStats = {
+      total_calls: 0, pickups: 0, pickup_rate: 0, voicemails: 0,
+      no_answers: 0, failures: 0, failure_streak: 0, last_call_at: 0, last_pickup_at: 0,
+    };
     const numbers = config.bland.fromPool.map((number) => {
-      const perf = this.performance.get(number) ||
-        this.createEmptyPerformance(number);
+      const perf = this.performance.get(number);
 
-      const onCooldown = !!perf.cooldown_until && perf.cooldown_until > now;
-      const cooldownRemaining = onCooldown && perf.cooldown_until
+      const onCooldown = perf ? !!perf.cooldown_until && perf.cooldown_until > now : false;
+      const cooldownRemaining = onCooldown && perf?.cooldown_until
         ? Math.ceil((perf.cooldown_until - now) / 1000)
         : null;
 
       return {
         number,
         formatted: this.formatPhoneNumber(number),
-        stats: { ...perf.stats },
+        stats: perf ? { ...perf.stats } : { ...defaultStats },
         on_cooldown: onCooldown,
         cooldown_remaining_seconds: cooldownRemaining,
       };
