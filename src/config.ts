@@ -196,6 +196,14 @@ export const config = {
       .filter(s => s.length > 0),
   },
 
+  // Number Pool Intelligence config
+  numberPool: {
+    rollingWindowHours: parseInt(process.env["NUMBER_POOL_ROLLING_WINDOW_HOURS"] || "48"),
+    cooldownThreshold: parseInt(process.env["NUMBER_POOL_COOLDOWN_THRESHOLD"] || "5"),
+    cooldownMinutes: parseInt(process.env["NUMBER_POOL_COOLDOWN_MINUTES"] || "5"),
+    mappingExpiryDays: parseInt(process.env["NUMBER_POOL_MAPPING_EXPIRY_DAYS"] || "30"),
+  },
+
   // Redial Daily Decay Schedule config
   redialDecay: {
     enabled: process.env["REDIAL_DECAY_ENABLED"] === "true",

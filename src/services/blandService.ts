@@ -15,11 +15,10 @@ import {
   BlandTranscript,
   CallOutcome,
 } from "../types/awh";
+import { numberPoolService } from "./numberPoolService";
 
 class BlandService {
   private client: AxiosInstance;
-  private poolIndex: number = 0; // For round-robin selection
-
   constructor() {
     this.client = axios.create({
       baseURL: config.bland.baseUrl,
@@ -33,27 +32,16 @@ class BlandService {
 
   /**
    * Select a phone number from the pool (if enabled)
-   * Supports both round-robin and random selection strategies
+   * Uses intelligent weighted selection based on per-number performance
+   * and lead-number mapping for preferred number matching.
    */
-  private selectFromNumber(): string {
+  private selectFromNumber(leadId?: string, phoneNumber?: string): string {
     // If pool is not enabled or empty, use single number
     if (!config.bland.usePool || config.bland.fromPool.length === 0) {
       return config.bland.from;
     }
 
-    const pool = config.bland.fromPool;
-    const strategy = config.bland.poolStrategy;
-
-    if (strategy === "random") {
-      // Random selection
-      const randomIndex = Math.floor(Math.random() * pool.length);
-      return pool[randomIndex] || config.bland.from;
-    } else {
-      // Round-robin selection (default)
-      const selectedNumber = pool[this.poolIndex] || config.bland.from;
-      this.poolIndex = (this.poolIndex + 1) % pool.length;
-      return selectedNumber;
-    }
+    return numberPoolService.selectNumber(leadId, phoneNumber);
   }
 
   /**
@@ -67,8 +55,8 @@ class BlandService {
     leadId?: string;
     listId?: string;
   }): Promise<BlandOutboundCallResponse> {
-    // Select phone number from pool (or use single number if pool disabled)
-    const selectedFromNumber = this.selectFromNumber();
+    // Select phone number from pool using intelligent weighted selection
+    const selectedFromNumber = this.selectFromNumber(payload.leadId, payload.phoneNumber);
 
     // Wait for rate limit slot before proceeding
     // This enforces:
