@@ -45,7 +45,7 @@ export function detectCallback(
   }
 
   // 2. Fallback: variables.callback_requested
-  if (call.variables?.callback_requested === true) {
+  if (call.variables?.["callback_requested"] === true) {
     return {
       category: "callback",
       confidence: "medium",
