@@ -764,6 +764,12 @@ class NumberPoolService {
       cooldown_remaining_seconds: number | null;
     }>;
     total_mappings: number;
+    config: {
+      rolling_window_hours: number;
+      cooldown_threshold: number;
+      cooldown_minutes: number;
+      mapping_expiry_days: number;
+    };
   } {
     const now = Date.now();
     const defaultStats: NumberStats = {
@@ -792,6 +798,12 @@ class NumberPoolService {
       strategy: "weighted",
       numbers,
       total_mappings: this.leadMappings.size,
+      config: {
+        rolling_window_hours: this.rollingWindowMs / (60 * 60 * 1000),
+        cooldown_threshold: this.cooldownThreshold,
+        cooldown_minutes: this.cooldownMinutes,
+        mapping_expiry_days: this.mappingExpiryDays,
+      },
     };
   }
 
@@ -863,6 +875,48 @@ class NumberPoolService {
       logger.info("Cleared all cooldowns", { cleared });
     }
     return cleared;
+  }
+
+  /**
+   * Update runtime config values (does not persist to .env — resets on restart)
+   */
+  updateConfig(updates: {
+    rolling_window_hours?: number;
+    cooldown_threshold?: number;
+    cooldown_minutes?: number;
+    mapping_expiry_days?: number;
+  }): {
+    rolling_window_hours: number;
+    cooldown_threshold: number;
+    cooldown_minutes: number;
+    mapping_expiry_days: number;
+  } {
+    if (updates.rolling_window_hours !== undefined && updates.rolling_window_hours > 0) {
+      this.rollingWindowMs = updates.rolling_window_hours * 60 * 60 * 1000;
+    }
+    if (updates.cooldown_threshold !== undefined && updates.cooldown_threshold > 0) {
+      this.cooldownThreshold = updates.cooldown_threshold;
+    }
+    if (updates.cooldown_minutes !== undefined && updates.cooldown_minutes > 0) {
+      this.cooldownMinutes = updates.cooldown_minutes;
+    }
+    if (updates.mapping_expiry_days !== undefined && updates.mapping_expiry_days > 0) {
+      this.mappingExpiryDays = updates.mapping_expiry_days;
+    }
+
+    logger.info("Number pool config updated at runtime", {
+      rolling_window_hours: this.rollingWindowMs / (60 * 60 * 1000),
+      cooldown_threshold: this.cooldownThreshold,
+      cooldown_minutes: this.cooldownMinutes,
+      mapping_expiry_days: this.mappingExpiryDays,
+    });
+
+    return {
+      rolling_window_hours: this.rollingWindowMs / (60 * 60 * 1000),
+      cooldown_threshold: this.cooldownThreshold,
+      cooldown_minutes: this.cooldownMinutes,
+      mapping_expiry_days: this.mappingExpiryDays,
+    };
   }
 
   /**

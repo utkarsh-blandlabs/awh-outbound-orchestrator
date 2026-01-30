@@ -84,6 +84,30 @@ router.post("/cooldown/clear", (req: Request, res: Response) => {
 });
 
 /**
+ * PUT /api/admin/number-pool/config
+ * Update runtime config (does not persist to .env)
+ */
+router.put("/config", (req: Request, res: Response) => {
+  try {
+    const updates = req.body || {};
+    const result = numberPoolService.updateConfig({
+      rolling_window_hours: updates.rolling_window_hours,
+      cooldown_threshold: updates.cooldown_threshold,
+      cooldown_minutes: updates.cooldown_minutes,
+      mapping_expiry_days: updates.mapping_expiry_days,
+    });
+    return res.json({
+      success: true,
+      message: "Config updated (runtime only — resets on restart)",
+      config: result,
+    });
+  } catch (error: any) {
+    logger.error("Error updating number pool config", { error: error.message });
+    return res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+/**
  * POST /api/admin/number-pool/reset
  * Reset all performance data
  */
