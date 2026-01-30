@@ -11,6 +11,7 @@ import { smsSchedulerService } from "../services/smsSchedulerService";
 import { badNumbersService } from "../services/badNumbersService";
 import { config } from "../config";
 import { BlandTranscript, CallOutcome } from "../types/awh";
+import { numberPoolService } from "../services/numberPoolService";
 
 const router = Router();
 
@@ -213,6 +214,14 @@ async function processCallCompletion(
         transcript.pathway_tags // Use pathway tags for accurate filtering
       );
     }
+
+    // Record outcome in number pool service for intelligent rotation
+    numberPoolService.recordOutcome(
+      callState.from_number,
+      transcript.outcome,
+      callState.phone_number,
+      callState.lead_id
+    );
 
     // Record call completion in daily tracker
     dailyCallTracker.recordCallComplete(

@@ -18,6 +18,7 @@ import dailyReportRouter from "./routes/dailyReportRoutes";
 import bulkOperationsRouter from "./routes/bulkOperationsRoutes";
 import blandConfigRouter from "./routes/blandConfigRoutes";
 import reportAnalysisRouter from "./routes/reportAnalysisRoutes";
+import numberPoolRouter from "./routes/numberPoolRoutes";
 import { versionService } from "./services/versionService";
 
 // Import services (they auto-start in their constructors)
@@ -164,6 +165,7 @@ app.use("/api/admin/daily-report", dailyReportRouter);
 app.use("/api/admin/bulk", bulkOperationsRouter);
 app.use("/api/admin/bland-config", blandConfigRouter);
 app.use("/api/admin/report-analysis", reportAnalysisRouter);
+app.use("/api/admin/number-pool", numberPoolRouter);
 
 // 404 handler
 app.use((req: Request, res: Response) => {
@@ -270,6 +272,11 @@ function gracefulShutdown(signal: string): void {
     // Stop queue processor
     queueProcessorService.stop();
     logger.info("Queue processor stopped");
+
+    // Stop number pool service
+    const { numberPoolService } = require("./services/numberPoolService");
+    numberPoolService.stop();
+    logger.info("Number pool service stopped");
 
     logger.info("All services stopped successfully");
   } catch (error: any) {
