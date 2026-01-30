@@ -17,25 +17,25 @@ const router = express.Router();
 const DATA_DIR = path.join(process.cwd(), "data");
 
 function getAnalyzer(): TranscriptAnalyzer {
+  const apiKey = process.env["BLAND_API_KEY"] || "";
   const config = {
     ...awhConfig,
-    blandApiKey: process.env.BLAND_API_KEY,
+    blandApiKey: apiKey,
   };
   return new TranscriptAnalyzer(config);
 }
 
 /**
  * GET /api/admin/report-analysis/analyze/:date
- * Analyze calls for a date using transcript analysis
  */
 router.get("/analyze/:date", async (req: Request, res: Response) => {
   try {
-    const { date } = req.params;
+    const date = req.params["date"] || "";
     if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) {
       return res.status(400).json({ success: false, error: "Invalid date format (YYYY-MM-DD)" });
     }
 
-    if (!process.env.BLAND_API_KEY) {
+    if (!process.env["BLAND_API_KEY"]) {
       return res.status(400).json({ success: false, error: "BLAND_API_KEY not configured" });
     }
 
@@ -52,18 +52,17 @@ router.get("/analyze/:date", async (req: Request, res: Response) => {
 
 /**
  * GET /api/admin/report-analysis/report/:date
- * Get formatted report (slack or text)
  */
 router.get("/report/:date", async (req: Request, res: Response) => {
   try {
-    const { date } = req.params;
-    const format = (req.query.format as string) || "text";
+    const date = req.params["date"] || "";
+    const format = (req.query["format"] as string) || "text";
 
     if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) {
       return res.status(400).json({ success: false, error: "Invalid date format" });
     }
 
-    if (!process.env.BLAND_API_KEY) {
+    if (!process.env["BLAND_API_KEY"]) {
       return res.status(400).json({ success: false, error: "BLAND_API_KEY not configured" });
     }
 
@@ -84,18 +83,17 @@ router.get("/report/:date", async (req: Request, res: Response) => {
 
 /**
  * POST /api/admin/report-analysis/fix-stats/:date
- * Fix statistics for a specific date using transcript analysis
  */
 router.post("/fix-stats/:date", async (req: Request, res: Response) => {
   try {
-    const { date } = req.params;
-    const dryRun = req.query.dry_run === "true";
+    const date = req.params["date"] || "";
+    const dryRun = req.query["dry_run"] === "true";
 
     if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) {
       return res.status(400).json({ success: false, error: "Invalid date format" });
     }
 
-    if (!process.env.BLAND_API_KEY) {
+    if (!process.env["BLAND_API_KEY"]) {
       return res.status(400).json({ success: false, error: "BLAND_API_KEY not configured" });
     }
 
@@ -112,12 +110,12 @@ router.post("/fix-stats/:date", async (req: Request, res: Response) => {
       dry_run: dryRun,
       changed: result.changed,
       old_stats: {
-        answered_calls: result.oldStats.answered_calls,
-        transferred_calls: result.oldStats.transferred_calls,
-        voicemail_calls: result.oldStats.voicemail_calls,
-        busy_calls: result.oldStats.busy_calls,
-        callback_requested_calls: result.oldStats.callback_requested_calls,
-        failed_calls: result.oldStats.failed_calls,
+        answered_calls: result.oldStats["answered_calls"],
+        transferred_calls: result.oldStats["transferred_calls"],
+        voicemail_calls: result.oldStats["voicemail_calls"],
+        busy_calls: result.oldStats["busy_calls"],
+        callback_requested_calls: result.oldStats["callback_requested_calls"],
+        failed_calls: result.oldStats["failed_calls"],
       },
       new_stats: {
         answered_calls: result.newStats.answered_calls,

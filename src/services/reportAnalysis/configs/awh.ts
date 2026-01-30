@@ -8,7 +8,7 @@ import { defaultConfig } from "./default";
 export const awhConfig: ClientConfig = {
   ...defaultConfig,
   name: "AWH",
-  blandApiKey: process.env.BLAND_API_KEY,
+  blandApiKey: process.env["BLAND_API_KEY"],
   categorizers: {
     ...defaultConfig.categorizers,
     transferred: {
