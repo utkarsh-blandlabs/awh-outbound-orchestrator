@@ -556,6 +556,30 @@ class NumberPoolService {
   }
 
   private checkCooldown(perf: NumberPerformance, now: number): void {
+    if (perf.stats.failure_streak < this.cooldownThreshold) {
+      return;
+    }
+
+    // SAFEGUARD: Never cooldown the last available number.
+    // Count how many pool numbers are currently NOT on cooldown.
+    const pool = config.bland.fromPool;
+    const availableCount = pool.filter((n) => {
+      if (n === perf.number) return false; // exclude the one we're about to cooldown
+      const p = this.performance.get(n);
+      return !p || !p.cooldown_until || p.cooldown_until < now;
+    }).length;
+
+    if (availableCount === 0) {
+      // This is the LAST available number — don't cooldown, just log a warning
+      logger.warn("Skipping cooldown — last available number in pool", {
+        number: perf.number,
+        failure_streak: perf.stats.failure_streak,
+        pool_size: pool.length,
+        note: "At least one number must remain available",
+      });
+      return;
+    }
+
     if (perf.stats.failure_streak >= this.cooldownThreshold * 2) {
       // Extended cooldown for severe failure streak
       perf.cooldown_until = now + this.cooldownMinutes * 3 * 60 * 1000;
@@ -563,13 +587,15 @@ class NumberPoolService {
         number: perf.number,
         failure_streak: perf.stats.failure_streak,
         cooldown_minutes: this.cooldownMinutes * 3,
+        available_numbers_remaining: availableCount,
       });
-    } else if (perf.stats.failure_streak >= this.cooldownThreshold) {
+    } else {
       perf.cooldown_until = now + this.cooldownMinutes * 60 * 1000;
       logger.warn("Number placed on cooldown", {
         number: perf.number,
         failure_streak: perf.stats.failure_streak,
         cooldown_minutes: this.cooldownMinutes,
+        available_numbers_remaining: availableCount,
       });
     }
   }
