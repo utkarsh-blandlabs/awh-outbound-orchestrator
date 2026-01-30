@@ -202,6 +202,7 @@ export const config = {
     cooldownThreshold: parseInt(process.env["NUMBER_POOL_COOLDOWN_THRESHOLD"] || "5"),
     cooldownMinutes: parseInt(process.env["NUMBER_POOL_COOLDOWN_MINUTES"] || "5"),
     mappingExpiryDays: parseInt(process.env["NUMBER_POOL_MAPPING_EXPIRY_DAYS"] || "30"),
+    minAvailable: parseInt(process.env["NUMBER_POOL_MIN_AVAILABLE"] || "2"),
   },
 
   // Redial Daily Decay Schedule config
