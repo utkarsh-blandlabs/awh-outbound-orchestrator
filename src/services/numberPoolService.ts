@@ -76,6 +76,7 @@ class NumberPoolService {
   private cooldownThreshold: number;
   private cooldownMinutes: number;
   private mappingExpiryDays: number;
+  private minAvailableNumbers: number;
 
   constructor() {
     this.dataDir = path.join(process.cwd(), "data", "number-pool");
@@ -97,6 +98,9 @@ class NumberPoolService {
     this.mappingExpiryDays = parseInt(
       process.env["NUMBER_POOL_MAPPING_EXPIRY_DAYS"] || "30"
     );
+    this.minAvailableNumbers = parseInt(
+      process.env["NUMBER_POOL_MIN_AVAILABLE"] || "2"
+    );
 
     this.ensureDirectories();
     this.loadPerformance();
@@ -115,6 +119,7 @@ class NumberPoolService {
       cooldown_threshold: this.cooldownThreshold,
       cooldown_minutes: this.cooldownMinutes,
       mapping_expiry_days: this.mappingExpiryDays,
+      min_available_numbers: this.minAvailableNumbers,
     });
   }
 
@@ -615,22 +620,23 @@ class NumberPoolService {
       return;
     }
 
-    // SAFEGUARD: Never cooldown the last available number.
-    // Count how many pool numbers are currently NOT on cooldown.
+    // SAFEGUARD: Always keep at least minAvailableNumbers active.
+    // Count how many pool numbers would remain available after this cooldown.
     const pool = config.bland.fromPool;
-    const availableCount = pool.filter((n) => {
+    const availableAfterCooldown = pool.filter((n) => {
       if (n === perf.number) return false; // exclude the one we're about to cooldown
       const p = this.performance.get(n);
       return !p || !p.cooldown_until || p.cooldown_until < now;
     }).length;
 
-    if (availableCount === 0) {
-      // This is the LAST available number — don't cooldown, just log a warning
-      logger.warn("Skipping cooldown — last available number in pool", {
+    if (availableAfterCooldown < this.minAvailableNumbers) {
+      // Cooling this number would leave fewer than minimum required — skip
+      logger.warn("Skipping cooldown — must keep minimum numbers available", {
         number: perf.number,
         failure_streak: perf.stats.failure_streak,
         pool_size: pool.length,
-        note: "At least one number must remain available",
+        available_after_cooldown: availableAfterCooldown,
+        min_required: this.minAvailableNumbers,
       });
       return;
     }
@@ -642,7 +648,7 @@ class NumberPoolService {
         number: perf.number,
         failure_streak: perf.stats.failure_streak,
         cooldown_minutes: this.cooldownMinutes * 3,
-        available_numbers_remaining: availableCount,
+        available_numbers_remaining: availableAfterCooldown,
       });
     } else {
       perf.cooldown_until = now + this.cooldownMinutes * 60 * 1000;
@@ -650,7 +656,7 @@ class NumberPoolService {
         number: perf.number,
         failure_streak: perf.stats.failure_streak,
         cooldown_minutes: this.cooldownMinutes,
-        available_numbers_remaining: availableCount,
+        available_numbers_remaining: availableAfterCooldown,
       });
     }
   }
@@ -769,6 +775,7 @@ class NumberPoolService {
       cooldown_threshold: number;
       cooldown_minutes: number;
       mapping_expiry_days: number;
+      min_available: number;
     };
   } {
     const now = Date.now();
@@ -803,6 +810,7 @@ class NumberPoolService {
         cooldown_threshold: this.cooldownThreshold,
         cooldown_minutes: this.cooldownMinutes,
         mapping_expiry_days: this.mappingExpiryDays,
+        min_available: this.minAvailableNumbers,
       },
     };
   }
@@ -885,11 +893,13 @@ class NumberPoolService {
     cooldown_threshold?: number;
     cooldown_minutes?: number;
     mapping_expiry_days?: number;
+    min_available?: number;
   }): {
     rolling_window_hours: number;
     cooldown_threshold: number;
     cooldown_minutes: number;
     mapping_expiry_days: number;
+    min_available: number;
   } {
     if (updates.rolling_window_hours !== undefined && updates.rolling_window_hours > 0) {
       this.rollingWindowMs = updates.rolling_window_hours * 60 * 60 * 1000;
@@ -903,12 +913,16 @@ class NumberPoolService {
     if (updates.mapping_expiry_days !== undefined && updates.mapping_expiry_days > 0) {
       this.mappingExpiryDays = updates.mapping_expiry_days;
     }
+    if (updates.min_available !== undefined && updates.min_available >= 1) {
+      this.minAvailableNumbers = updates.min_available;
+    }
 
     logger.info("Number pool config updated at runtime", {
       rolling_window_hours: this.rollingWindowMs / (60 * 60 * 1000),
       cooldown_threshold: this.cooldownThreshold,
       cooldown_minutes: this.cooldownMinutes,
       mapping_expiry_days: this.mappingExpiryDays,
+      min_available: this.minAvailableNumbers,
     });
 
     return {
@@ -916,6 +930,7 @@ class NumberPoolService {
       cooldown_threshold: this.cooldownThreshold,
       cooldown_minutes: this.cooldownMinutes,
       mapping_expiry_days: this.mappingExpiryDays,
+      min_available: this.minAvailableNumbers,
     };
   }
 

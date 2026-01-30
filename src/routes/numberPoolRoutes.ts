@@ -95,6 +95,7 @@ router.put("/config", (req: Request, res: Response) => {
       cooldown_threshold: updates.cooldown_threshold,
       cooldown_minutes: updates.cooldown_minutes,
       mapping_expiry_days: updates.mapping_expiry_days,
+      min_available: updates.min_available,
     });
     return res.json({
       success: true,
