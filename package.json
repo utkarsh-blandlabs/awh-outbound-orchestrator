@@ -17,19 +17,33 @@
     "build": "tsc",
     "start": "node build/index.js",
     "lint": "echo 'No linting configured yet'",
-    "test": "echo 'No tests configured yet'"
+    "test": "echo 'No tests configured yet'",
+    "backfill": "node --max-old-space-size=2048 --expose-gc backfill-from-bland-v4.js",
+    "backfill:dry-run": "node --max-old-space-size=2048 --expose-gc backfill-from-bland-v4.js --dry-run",
+    "backfill:v3": "node --max-old-space-size=2048 --expose-gc backfill-from-bland-v3.1.js",
+    "backfill:v2": "node --max-old-space-size=2048 --expose-gc backfill-from-bland-v2.js",
+    "backfill:v2:resume": "node --max-old-space-size=2048 --expose-gc backfill-from-bland-v2.js --resume",
+    "backfill:v1": "node --max-old-space-size=2048 --expose-gc backfill-from-bland-optimized.js",
+    "backfill:old": "node --expose-gc backfill-from-bland.js",
+    "backfill:convoso": "node backfill-missing-convoso-leads.js",
+    "report:breakdown": "node get-detailed-breakdown.js",
+    "report:date-range": "node get-date-range-report.js",
+    "report:total": "node get-total-leads.js",
+    "blocklist:normalize": "npx ts-node scripts/normalize-blocklist.ts"
   },
   "dependencies": {
     "axios": "^1.7.0",
-    "express": "^4.19.0"
+    "dotenv": "^17.2.3",
+    "express": "^4.19.0",
+    "@types/express": "^4.17.25",
+    "@types/node": "^20.19.25",
+    "typescript": "^5.9.3",
+    "mongodb": "^6.3.0"
   },
   "devDependencies": {
-    "@types/express": "^4.17.21",
-    "@types/node": "^20.0.0",
-    "ts-node-dev": "^2.0.0",
-    "typescript": "^5.9.3"
+    "ts-node-dev": "^2.0.0"
   },
   "engines": {
-    "node": ">=18.0.0"
+    "node": "20.x"
   }
 }

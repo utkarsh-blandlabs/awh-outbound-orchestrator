@@ -1,0 +1,2750 @@
+{
+	"info": {
+		"_postman_id": "awh-orchestrator-api-2026",
+		"name": "AWH Outbound Orchestrator - Complete API",
+		"description": "Complete API collection for AWH Outbound Orchestrator with 85+ endpoints.\n\n**Environment Variables Required:**\n- `base_url`: http://localhost:3000 (or your production URL)\n- `admin_api_key`: awh_admin_2024_secure_key_change_in_production\n\n**Categories:**\n1. Webhook Endpoints (No Auth)\n2. Admin - System Management\n3. Admin - Calls Management\n4. Admin - Statistics\n5. Admin - Queue Management\n6. Admin - Blocklist\n7. Admin - Reports\n8. Admin - Analytics\n9. Admin - Test Mode",
+		"schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json",
+		"_exporter_id": "awh-orchestrator"
+	},
+	"item": [
+		{
+			"name": "1. Webhook Endpoints (No Auth)",
+			"item": [
+				{
+					"name": "AWHealth Outbound Webhook",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"phone_number\": \"5551234567\",\n  \"lead_id\": \"12345\",\n  \"list_id\": \"789\",\n  \"first_name\": \"John\",\n  \"last_name\": \"Doe\",\n  \"state\": \"CA\",\n  \"email\": \"john@example.com\",\n  \"postal_code\": \"90001\",\n  \"age\": \"44\"\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/webhooks/awhealth-outbound",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"webhooks",
+								"awhealth-outbound"
+							]
+						},
+						"description": "Main webhook to receive outbound call triggers from Convoso. Validates, checks blocklist, applies rate limiting, and initiates Bland AI call."
+					},
+					"response": []
+				},
+				{
+					"name": "Bland AI Callback Webhook",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"call_id\": \"call_xyz123\",\n  \"status\": \"completed\",\n  \"answered_by\": \"human\",\n  \"to\": \"5551234567\",\n  \"from\": \"5559876543\",\n  \"concatenated_transcript\": \"Customer was interested in Medicare plans\",\n  \"pathway_tags\": [\"interested\", \"callback\"],\n  \"transferred_to\": \"5555551234\",\n  \"call_length\": 120,\n  \"completed\": true\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/webhooks/bland-callback",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"webhooks",
+								"bland-callback"
+							]
+						},
+						"description": "Receives call completion callbacks from Bland AI. Updates Convoso, manages redial queue, detects DNC requests, blocks failed numbers."
+					},
+					"response": []
+				},
+				{
+					"name": "Callback Request Webhook",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"phone_number\": \"5551234567\",\n  \"first_name\": \"John\",\n  \"last_name\": \"Doe\",\n  \"lead_id\": \"12345\",\n  \"list_id\": \"789\",\n  \"status\": \"CALLBACK\"\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/webhooks/call-back",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"webhooks",
+								"call-back"
+							]
+						},
+						"description": "Zapier replacement - receives callback triggers from Convoso and initiates Bland AI calls immediately."
+					},
+					"response": []
+				},
+				{
+					"name": "SMS Reply Webhook",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"from\": \"5551234567\",\n  \"to\": \"5559876543\",\n  \"body\": \"Yes, please call me back\"\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/webhooks/sms-reply",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"webhooks",
+								"sms-reply"
+							]
+						},
+						"description": "Handles incoming SMS replies from Bland AI. Automatically processes:\n\n**STOP Keywords (DNC):**\n- Adds to blocklist\n- Removes from SMS queue\n- Updates Convoso with DNC status\n- Marks as completed in redial queue\n\n**Callback Keywords (YES, CALL ME, etc.):**\n- Schedules callback in redial queue (5 min if business hours, 1 hour otherwise)\n- Updates Convoso with CB (callback) status\n\n**Negative Keywords (NO, NOT INTERESTED):**\n- Removes from SMS queue\n- Updates Convoso with NI (not interested) status\n\nAll Convoso updates include timestamp and SMS message context."
+					},
+					"response": []
+				},
+				{
+					"name": "Pathway - Update Zip Code",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"phone_number\": \"5551234567\",\n  \"lead_id\": \"12345\",\n  \"list_id\": \"789\",\n  \"zip_code\": \"90001\"\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/webhooks/pathway/update-zip",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"webhooks",
+								"pathway",
+								"update-zip"
+							]
+						},
+						"description": "Updates lead's zip code in Convoso DURING active call. Called by Bland AI pathway when Ashley collects zip code. Live agent sees correct data immediately."
+					},
+					"response": []
+				},
+				{
+					"name": "Pathway - Update Lead Data",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"phone_number\": \"5551234567\",\n  \"lead_id\": \"12345\",\n  \"list_id\": \"789\",\n  \"data\": {\n    \"postal_code\": \"90001\",\n    \"state\": \"CA\",\n    \"plan_type\": \"Medicare Advantage\",\n    \"age\": \"65\"\n  }\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/webhooks/pathway/update-lead-data",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"webhooks",
+								"pathway",
+								"update-lead-data"
+							]
+						},
+						"description": "Generic endpoint to update any lead data during pathway execution. Updates multiple Convoso fields in one call."
+					},
+					"response": []
+				}
+			],
+			"description": "Webhook endpoints that don't require authentication. These are called by external systems (Convoso, Bland AI)."
+		},
+		{
+			"name": "2. Admin - System Management",
+			"item": [
+				{
+					"name": "Get System Configuration",
+					"request": {
+						"method": "GET",
+						"header": [
+							{
+								"key": "x-api-key",
+								"value": "{{admin_api_key}}",
+								"type": "text"
+							}
+						],
+						"url": {
+							"raw": "{{base_url}}/api/admin/config",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"api",
+								"admin",
+								"config"
+							]
+						},
+						"description": "Get system configuration (excluding sensitive data). Returns server, Bland, Convoso, retry, rate limiter, and cache settings."
+					},
+					"response": []
+				},
+				{
+					"name": "Get System Health",
+					"request": {
+						"method": "GET",
+						"header": [
+							{
+								"key": "x-api-key",
+								"value": "{{admin_api_key}}",
+								"type": "text"
+							}
+						],
+						"url": {
+							"raw": "{{base_url}}/api/admin/health",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"api",
+								"admin",
+								"health"
+							]
+						},
+						"description": "Comprehensive system health check. Returns status, uptime, memory usage, active calls count, rate limiting info, and service status."
+					},
+					"response": []
+				}
+			],
+			"description": "System-level endpoints for configuration and health monitoring."
+		},
+		{
+			"name": "3. Admin - Calls Management",
+			"item": [
+				{
+					"name": "Get All Active Calls",
+					"request": {
+						"method": "GET",
+						"header": [
+							{
+								"key": "x-api-key",
+								"value": "{{admin_api_key}}",
+								"type": "text"
+							}
+						],
+						"url": {
+							"raw": "{{base_url}}/api/admin/calls/active",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"api",
+								"admin",
+								"calls",
+								"active"
+							]
+						},
+						"description": "Get all active/pending calls from CallStateManager. Returns enriched call objects with duration, age, and stale status."
+					},
+					"response": []
+				},
+				{
+					"name": "Get Call Statistics",
+					"request": {
+						"method": "GET",
+						"header": [
+							{
+								"key": "x-api-key",
+								"value": "{{admin_api_key}}",
+								"type": "text"
+							}
+						],
+						"url": {
+							"raw": "{{base_url}}/api/admin/calls/stats",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"api",
+								"admin",
+								"calls",
+								"stats"
+							]
+						},
+						"description": "Get call cache statistics and memory usage. Returns total, pending, completed, failed counts."
+					},
+					"response": []
+				},
+				{
+					"name": "Get Specific Call",
+					"request": {
+						"method": "GET",
+						"header": [
+							{
+								"key": "x-api-key",
+								"value": "{{admin_api_key}}",
+								"type": "text"
+							}
+						],
+						"url": {
+							"raw": "{{base_url}}/api/admin/calls/:call_id",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"api",
+								"admin",
+								"calls",
+								":call_id"
+							],
+							"variable": [
+								{
+									"key": "call_id",
+									"value": "call_xyz123"
+								}
+							]
+						},
+						"description": "Get details for a specific call by call_id. Returns complete call state with calculated fields."
+					},
+					"response": []
+				},
+				{
+					"name": "Delete Specific Call",
+					"request": {
+						"method": "DELETE",
+						"header": [
+							{
+								"key": "x-api-key",
+								"value": "{{admin_api_key}}",
+								"type": "text"
+							}
+						],
+						"url": {
+							"raw": "{{base_url}}/api/admin/calls/:call_id",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"api",
+								"admin",
+								"calls",
+								":call_id"
+							],
+							"variable": [
+								{
+									"key": "call_id",
+									"value": "call_xyz123"
+								}
+							]
+						},
+						"description": "Manually remove a specific call from cache. Use for cleaning up stuck calls."
+					},
+					"response": []
+				},
+				{
+					"name": "Clear Completed Calls Cache",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "x-api-key",
+								"value": "{{admin_api_key}}",
+								"type": "text"
+							}
+						],
+						"url": {
+							"raw": "{{base_url}}/api/admin/cache/clear",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"api",
+								"admin",
+								"cache",
+								"clear"
+							]
+						},
+						"description": "Clear completed calls from cache. Returns before/after stats and count of cleared calls."
+					},
+					"response": []
+				},
+				{
+					"name": "Get Call History for Phone",
+					"request": {
+						"method": "GET",
+						"header": [
+							{
+								"key": "x-api-key",
+								"value": "{{admin_api_key}}",
+								"type": "text"
+							}
+						],
+						"url": {
+							"raw": "{{base_url}}/api/admin/calls/history/:phoneNumber",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"api",
+								"admin",
+								"calls",
+								"history",
+								":phoneNumber"
+							],
+							"variable": [
+								{
+									"key": "phoneNumber",
+									"value": "5551234567"
+								}
+							]
+						},
+						"description": "Get complete call history for a specific phone number. Returns all attempts and outcomes."
+					},
+					"response": []
+				},
+				{
+					"name": "Get Today's Calls",
+					"request": {
+						"method": "GET",
+						"header": [
+							{
+								"key": "x-api-key",
+								"value": "{{admin_api_key}}",
+								"type": "text"
+							}
+						],
+						"url": {
+							"raw": "{{base_url}}/api/admin/calls/today",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"api",
+								"admin",
+								"calls",
+								"today"
+							]
+						},
+						"description": "Get all calls made today. Returns complete daily call records."
+					},
+					"response": []
+				},
+				{
+					"name": "Get Daily Call Statistics",
+					"request": {
+						"method": "GET",
+						"header": [
+							{
+								"key": "x-api-key",
+								"value": "{{admin_api_key}}",
+								"type": "text"
+							}
+						],
+						"url": {
+							"raw": "{{base_url}}/api/admin/calls/stats/daily",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"api",
+								"admin",
+								"calls",
+								"stats",
+								"daily"
+							]
+						},
+						"description": "Get today's call statistics summary. Quick daily overview."
+					},
+					"response": []
+				},
+				{
+					"name": "Block Phone Number",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "x-api-key",
+								"value": "{{admin_api_key}}",
+								"type": "text"
+							},
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"phone_number\": \"5551234567\",\n  \"reason\": \"Customer requested DNC\"\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/api/admin/calls/block",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"api",
+								"admin",
+								"calls",
+								"block"
+							]
+						},
+						"description": "Manually block a phone number. Adds to call protection blocklist."
+					},
+					"response": []
+				},
+				{
+					"name": "Unblock Phone Number",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "x-api-key",
+								"value": "{{admin_api_key}}",
+								"type": "text"
+							},
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"phone_number\": \"5551234567\"\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/api/admin/calls/unblock",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"api",
+								"admin",
+								"calls",
+								"unblock"
+							]
+						},
+						"description": "Remove block from a phone number. Unblocks incorrectly blocked numbers."
+					},
+					"response": []
+				},
+				{
+					"name": "Get Call Protection Config",
+					"request": {
+						"method": "GET",
+						"header": [
+							{
+								"key": "x-api-key",
+								"value": "{{admin_api_key}}",
+								"type": "text"
+							}
+						],
+						"url": {
+							"raw": "{{base_url}}/api/admin/calls/protection/config",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"api",
+								"admin",
+								"calls",
+								"protection",
+								"config"
+							]
+						},
+						"description": "Get call protection configuration. Returns rate limiting and max attempts settings."
+					},
+					"response": []
+				},
+				{
+					"name": "Update Call Protection Config",
+					"request": {
+						"method": "PUT",
+						"header": [
+							{
+								"key": "x-api-key",
+								"value": "{{admin_api_key}}",
+								"type": "text"
+							},
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"enabled\": true,\n  \"intervalMinutes\": 5,\n  \"maxAttemptsPerDay\": 10\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/api/admin/calls/protection/config",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"api",
+								"admin",
+								"calls",
+								"protection",
+								"config"
+							]
+						},
+						"description": "Update call protection settings. Adjust rate limiting rules and daily attempt limits."
+					},
+					"response": []
+				}
+			],
+			"description": "Call management endpoints for monitoring active calls, call history, statistics, and call protection."
+		},
+		{
+			"name": "4. Admin - Statistics",
+			"item": [
+				{
+					"name": "Stored Statistics (from local files)",
+					"description": "Endpoints that read from locally stored statistics files",
+					"item": [
+						{
+							"name": "Get Today's Statistics",
+							"request": {
+								"method": "GET",
+								"header": [
+									{
+										"key": "x-api-key",
+										"value": "{{admin_api_key}}",
+										"type": "text"
+									}
+								],
+								"url": {
+									"raw": "{{base_url}}/api/admin/statistics/today",
+									"host": [
+										"{{base_url}}"
+									],
+									"path": [
+										"api",
+										"admin",
+										"statistics",
+										"today"
+									]
+								},
+								"description": "Get call outcome statistics for today from local file storage.\n\n**Marlinea's Formula:**\n- answered_calls = calls with \"Plan Type\" OR \"Voicemail Left\" tags\n- transferred_calls = calls with \"Transferred to Agent\" tag\n- connectivity_rate = (transferred_calls / answered_calls) * 100"
+							},
+							"response": []
+						},
+						{
+							"name": "Get Statistics for Date",
+							"request": {
+								"method": "GET",
+								"header": [
+									{
+										"key": "x-api-key",
+										"value": "{{admin_api_key}}",
+										"type": "text"
+									}
+								],
+								"url": {
+									"raw": "{{base_url}}/api/admin/statistics/date/:date",
+									"host": [
+										"{{base_url}}"
+									],
+									"path": [
+										"api",
+										"admin",
+										"statistics",
+										"date",
+										":date"
+									],
+									"variable": [
+										{
+											"key": "date",
+											"value": "2026-01-24",
+											"description": "Format: YYYY-MM-DD"
+										}
+									]
+								},
+								"description": "Get statistics for a specific date from local file storage. Format: YYYY-MM-DD"
+							},
+							"response": []
+						},
+						{
+							"name": "Get Statistics for Date Range",
+							"request": {
+								"method": "GET",
+								"header": [
+									{
+										"key": "x-api-key",
+										"value": "{{admin_api_key}}",
+										"type": "text"
+									}
+								],
+								"url": {
+									"raw": "{{base_url}}/api/admin/statistics/range?start_date=2026-01-20&end_date=2026-01-25",
+									"host": [
+										"{{base_url}}"
+									],
+									"path": [
+										"api",
+										"admin",
+										"statistics",
+										"range"
+									],
+									"query": [
+										{
+											"key": "start_date",
+											"value": "2026-01-20",
+											"description": "Format: YYYY-MM-DD"
+										},
+										{
+											"key": "end_date",
+											"value": "2026-01-25",
+											"description": "Format: YYYY-MM-DD"
+										}
+									]
+								},
+								"description": "Get statistics for a date range from local file storage. Returns array of daily statistics."
+							},
+							"response": []
+						},
+						{
+							"name": "Get All-Time Statistics",
+							"request": {
+								"method": "GET",
+								"header": [
+									{
+										"key": "x-api-key",
+										"value": "{{admin_api_key}}",
+										"type": "text"
+									}
+								],
+								"url": {
+									"raw": "{{base_url}}/api/admin/statistics/all-time",
+									"host": [
+										"{{base_url}}"
+									],
+									"path": [
+										"api",
+										"admin",
+										"statistics",
+										"all-time"
+									]
+								},
+								"description": "Get aggregated statistics across all tracked dates from local file storage."
+							},
+							"response": []
+						}
+					]
+				},
+				{
+					"name": "Live Reports (from Bland API)",
+					"description": "Endpoints that fetch fresh data from Bland API in real-time",
+					"item": [
+						{
+							"name": "Live Report - Today",
+							"request": {
+								"method": "GET",
+								"header": [
+									{
+										"key": "x-api-key",
+										"value": "{{admin_api_key}}",
+										"type": "text"
+									}
+								],
+								"url": {
+									"raw": "{{base_url}}/api/admin/calls/stats/live-report",
+									"host": [
+										"{{base_url}}"
+									],
+									"path": [
+										"api",
+										"admin",
+										"calls",
+										"stats",
+										"live-report"
+									]
+								},
+								"description": "Generate live report for TODAY up to the current hour.\n\nFetches fresh data from Bland API and calculates stats using Marlinea's logic.\n\n**Response includes:**\n- current_hour: The hour up to which data was fetched\n- hours_processed: Number of hours fetched\n- hourly_breakdown: Per-hour call counts\n- Stats: total_calls, answered_calls, transferred_calls, connectivity_rate"
+							},
+							"response": []
+						},
+						{
+							"name": "Live Report - Specific Date",
+							"request": {
+								"method": "GET",
+								"header": [
+									{
+										"key": "x-api-key",
+										"value": "{{admin_api_key}}",
+										"type": "text"
+									}
+								],
+								"url": {
+									"raw": "{{base_url}}/api/admin/calls/stats/live-report?date=2026-01-24",
+									"host": [
+										"{{base_url}}"
+									],
+									"path": [
+										"api",
+										"admin",
+										"calls",
+										"stats",
+										"live-report"
+									],
+									"query": [
+										{
+											"key": "date",
+											"value": "2026-01-24",
+											"description": "Date in YYYY-MM-DD format"
+										}
+									]
+								},
+								"description": "Generate report for a HISTORICAL date (all 24 hours).\n\nFetches fresh data from Bland API using parallel hourly chunks to bypass the 1000 record limit."
+							},
+							"response": []
+						},
+						{
+							"name": "Live Report - With Pathway Filter",
+							"request": {
+								"method": "GET",
+								"header": [
+									{
+										"key": "x-api-key",
+										"value": "{{admin_api_key}}",
+										"type": "text"
+									}
+								],
+								"url": {
+									"raw": "{{base_url}}/api/admin/calls/stats/live-report?date=2026-01-24&pathway_id=your-pathway-id",
+									"host": [
+										"{{base_url}}"
+									],
+									"path": [
+										"api",
+										"admin",
+										"calls",
+										"stats",
+										"live-report"
+									],
+									"query": [
+										{
+											"key": "date",
+											"value": "2026-01-24",
+											"description": "Date in YYYY-MM-DD format"
+										},
+										{
+											"key": "pathway_id",
+											"value": "your-pathway-id",
+											"description": "Optional: Filter by specific pathway"
+										}
+									]
+								},
+								"description": "Generate report for a specific date and pathway.\n\nUseful when you have multiple pathways and want stats for just one."
+							},
+							"response": []
+						}
+					]
+				},
+				{
+					"name": "Recalculate Stats (from Bland API)",
+					"description": "Endpoints to recalculate and save statistics from Bland API to local storage",
+					"item": [
+						{
+							"name": "Recalculate - Single Date (Parallel)",
+							"request": {
+								"method": "POST",
+								"header": [
+									{
+										"key": "x-api-key",
+										"value": "{{admin_api_key}}",
+										"type": "text"
+									},
+									{
+										"key": "Content-Type",
+										"value": "application/json",
+										"type": "text"
+									}
+								],
+								"body": {
+									"mode": "raw",
+									"raw": "{\n  \"date\": \"2026-01-24\",\n  \"pathway_id\": null\n}"
+								},
+								"url": {
+									"raw": "{{base_url}}/api/admin/calls/stats/recalculate",
+									"host": [
+										"{{base_url}}"
+									],
+									"path": [
+										"api",
+										"admin",
+										"calls",
+										"stats",
+										"recalculate"
+									]
+								},
+								"description": "Recalculate statistics for a single date using PARALLEL hourly fetching.\n\n**Fast mode** - all 24 API calls run simultaneously.\n\nFetches all calls from Bland API (bypasses 1000 limit using hourly chunks), applies Marlinea's tag-based logic, and saves to local file.\n\n**Marlinea's Logic:**\n- answered_calls = calls with \"Plan Type\" OR \"Voicemail Left\" tags\n- transferred_calls = calls with \"Transferred to Agent\" tag\n- connectivity_rate = (transferred_calls / answered_calls) * 100"
+							},
+							"response": []
+						},
+						{
+							"name": "Recalculate - Single Date (Sequential)",
+							"request": {
+								"method": "POST",
+								"header": [
+									{
+										"key": "x-api-key",
+										"value": "{{admin_api_key}}",
+										"type": "text"
+									},
+									{
+										"key": "Content-Type",
+										"value": "application/json",
+										"type": "text"
+									}
+								],
+								"body": {
+									"mode": "raw",
+									"raw": "{\n  \"date\": \"2026-01-24\",\n  \"pathway_id\": null\n}"
+								},
+								"url": {
+									"raw": "{{base_url}}/api/admin/calls/stats/recalculate-sequential",
+									"host": [
+										"{{base_url}}"
+									],
+									"path": [
+										"api",
+										"admin",
+										"calls",
+										"stats",
+										"recalculate-sequential"
+									]
+								},
+								"description": "Recalculate statistics for a single date using SEQUENTIAL hourly fetching.\n\n**Debug mode** - fetches hour by hour with detailed tracking.\n\n**Response includes:**\n- hourly_breakdown: Array of per-hour stats (count, hitLimit, errors)\n- comparison: Verification data for cross-checking\n\nUseful for:\n- Debugging when parallel mode shows unexpected results\n- Identifying which hours hit the 1000 record limit\n- Tracking errors in specific hour windows"
+							},
+							"response": []
+						},
+						{
+							"name": "Recalculate - Date Range",
+							"request": {
+								"method": "POST",
+								"header": [
+									{
+										"key": "x-api-key",
+										"value": "{{admin_api_key}}",
+										"type": "text"
+									},
+									{
+										"key": "Content-Type",
+										"value": "application/json",
+										"type": "text"
+									}
+								],
+								"body": {
+									"mode": "raw",
+									"raw": "{\n  \"start_date\": \"2026-01-20\",\n  \"end_date\": \"2026-01-25\",\n  \"pathway_id\": null\n}"
+								},
+								"url": {
+									"raw": "{{base_url}}/api/admin/calls/stats/recalculate-range",
+									"host": [
+										"{{base_url}}"
+									],
+									"path": [
+										"api",
+										"admin",
+										"calls",
+										"stats",
+										"recalculate-range"
+									]
+								},
+								"description": "Recalculate statistics for a date range.\n\nProcesses each date sequentially (with 1s delay between dates to avoid rate limiting).\n\n**Warning:** This can take a while for large date ranges. Each date makes 24 API calls to Bland."
+							},
+							"response": []
+						}
+					]
+				}
+			],
+			"description": "Statistical endpoints for call outcome analytics and reporting.\n\n**Marlinea's Formula:**\n- answered_calls = calls with \"Plan Type\" OR \"Voicemail Left\" tags\n- transferred_calls = calls with \"Transferred to Agent\" tag\n- connectivity_rate = (transferred_calls / answered_calls) * 100\n\n**Endpoint Types:**\n- Stored Statistics: Read from local files (fast, offline)\n- Live Reports: Fetch fresh data from Bland API (real-time)\n- Recalculate: Fetch from Bland and save to local files"
+		},
+		{
+			"name": "5. Admin - Queue Management",
+			"item": [
+				{
+					"name": "Scheduler",
+					"item": [
+						{
+							"name": "Get Scheduler Config",
+							"request": {
+								"method": "GET",
+								"header": [
+									{
+										"key": "x-api-key",
+										"value": "{{admin_api_key}}",
+										"type": "text"
+									}
+								],
+								"url": {
+									"raw": "{{base_url}}/api/admin/scheduler/config",
+									"host": [
+										"{{base_url}}"
+									],
+									"path": [
+										"api",
+										"admin",
+										"scheduler",
+										"config"
+									]
+								},
+								"description": "Get scheduler configuration and status. Returns business hours, timezone, queue stats."
+							},
+							"response": []
+						},
+						{
+							"name": "Update Scheduler Config",
+							"request": {
+								"method": "PUT",
+								"header": [
+									{
+										"key": "x-api-key",
+										"value": "{{admin_api_key}}",
+										"type": "text"
+									},
+									{
+										"key": "Content-Type",
+										"value": "application/json"
+									}
+								],
+								"body": {
+									"mode": "raw",
+									"raw": "{\n  \"enabled\": true,\n  \"callbacksEnabled\": true,\n  \"timezone\": \"America/New_York\",\n  \"schedule\": {\n    \"start\": \"09:00\",\n    \"end\": \"20:00\",\n    \"days\": [1, 2, 3, 4, 5]\n  }\n}"
+								},
+								"url": {
+									"raw": "{{base_url}}/api/admin/scheduler/config",
+									"host": [
+										"{{base_url}}"
+									],
+									"path": [
+										"api",
+										"admin",
+										"scheduler",
+										"config"
+									]
+								},
+								"description": "Update scheduler settings. Change business hours, timezone, enable/disable."
+							},
+							"response": []
+						},
+						{
+							"name": "Get Queued Requests",
+							"request": {
+								"method": "GET",
+								"header": [
+									{
+										"key": "x-api-key",
+										"value": "{{admin_api_key}}",
+										"type": "text"
+									}
+								],
+								"url": {
+									"raw": "{{base_url}}/api/admin/scheduler/queue",
+									"host": [
+										"{{base_url}}"
+									],
+									"path": [
+										"api",
+										"admin",
+										"scheduler",
+										"queue"
+									]
+								},
+								"description": "Get all queued callback requests. Returns queue count and items."
+							},
+							"response": []
+						},
+						{
+							"name": "Process Queued Requests",
+							"request": {
+								"method": "POST",
+								"header": [
+									{
+										"key": "x-api-key",
+										"value": "{{admin_api_key}}",
+										"type": "text"
+									}
+								],
+								"url": {
+									"raw": "{{base_url}}/api/admin/scheduler/queue/process?batch_size=10",
+									"host": [
+										"{{base_url}}"
+									],
+									"path": [
+										"api",
+										"admin",
+										"scheduler",
+										"queue",
+										"process"
+									],
+									"query": [
+										{
+											"key": "batch_size",
+											"value": "10",
+											"description": "Optional: Number of requests to process"
+										}
+									]
+								},
+								"description": "Manually trigger queue processing. Optional batch_size parameter."
+							},
+							"response": []
+						},
+						{
+							"name": "Clear Queued Requests",
+							"request": {
+								"method": "DELETE",
+								"header": [
+									{
+										"key": "x-api-key",
+										"value": "{{admin_api_key}}",
+										"type": "text"
+									}
+								],
+								"url": {
+									"raw": "{{base_url}}/api/admin/scheduler/queue",
+									"host": [
+										"{{base_url}}"
+									],
+									"path": [
+										"api",
+										"admin",
+										"scheduler",
+										"queue"
+									]
+								},
+								"description": "Clear all queued requests. Emergency queue cleanup."
+							},
+							"response": []
+						}
+					],
+					"description": "Scheduler endpoints for managing callback scheduling and business hours."
+				},
+				{
+					"name": "Redial Queue",
+					"item": [
+						{
+							"name": "Get Redial Queue Status",
+							"request": {
+								"method": "GET",
+								"header": [
+									{
+										"key": "x-api-key",
+										"value": "{{admin_api_key}}",
+										"type": "text"
+									}
+								],
+								"url": {
+									"raw": "{{base_url}}/api/admin/redial-queue/status",
+									"host": [
+										"{{base_url}}"
+									],
+									"path": [
+										"api",
+										"admin",
+										"redial-queue",
+										"status"
+									]
+								},
+								"description": "Get redial queue processor status and statistics. Returns total leads, ready to dial, config."
+							},
+							"response": []
+						},
+						{
+							"name": "Get Redial Queue Config",
+							"request": {
+								"method": "GET",
+								"header": [
+									{
+										"key": "x-api-key",
+										"value": "{{admin_api_key}}",
+										"type": "text"
+									}
+								],
+								"url": {
+									"raw": "{{base_url}}/api/admin/redial-queue/config",
+									"host": [
+										"{{base_url}}"
+									],
+									"path": [
+										"api",
+										"admin",
+										"redial-queue",
+										"config"
+									]
+								},
+								"description": "Get redial queue configuration. Returns max attempts, retention, intervals."
+							},
+							"response": []
+						},
+						{
+							"name": "Update Redial Queue Config",
+							"request": {
+								"method": "PUT",
+								"header": [
+									{
+										"key": "x-api-key",
+										"value": "{{admin_api_key}}",
+										"type": "text"
+									},
+									{
+										"key": "Content-Type",
+										"value": "application/json"
+									}
+								],
+								"body": {
+									"mode": "raw",
+									"raw": "{\n  \"maxDailyAttempts\": 10,\n  \"retentionDays\": 45,\n  \"processingIntervalMinutes\": 5\n}"
+								},
+								"url": {
+									"raw": "{{base_url}}/api/admin/redial-queue/config",
+									"host": [
+										"{{base_url}}"
+									],
+									"path": [
+										"api",
+										"admin",
+										"redial-queue",
+										"config"
+									]
+								},
+								"description": "Update redial queue settings. Adjust max attempts, retention, intervals."
+							},
+							"response": []
+						},
+						{
+							"name": "Get Redial Queue Records",
+							"request": {
+								"method": "GET",
+								"header": [
+									{
+										"key": "x-api-key",
+										"value": "{{admin_api_key}}",
+										"type": "text"
+									}
+								],
+								"url": {
+									"raw": "{{base_url}}/api/admin/redial-queue/records?status=pending&ready=true&limit=100&offset=0",
+									"host": [
+										"{{base_url}}"
+									],
+									"path": [
+										"api",
+										"admin",
+										"redial-queue",
+										"records"
+									],
+									"query": [
+										{
+											"key": "status",
+											"value": "pending",
+											"description": "Filter by status"
+										},
+										{
+											"key": "ready",
+											"value": "true",
+											"description": "Filter by ready to dial"
+										},
+										{
+											"key": "limit",
+											"value": "100",
+											"description": "Max records to return"
+										},
+										{
+											"key": "offset",
+											"value": "0",
+											"description": "Pagination offset"
+										}
+									]
+								},
+								"description": "Get redial queue records with filtering. Supports status, ready, limit, offset."
+							},
+							"response": []
+						},
+						{
+							"name": "Start Redial Queue",
+							"request": {
+								"method": "POST",
+								"header": [
+									{
+										"key": "x-api-key",
+										"value": "{{admin_api_key}}",
+										"type": "text"
+									}
+								],
+								"url": {
+									"raw": "{{base_url}}/api/admin/redial-queue/start",
+									"host": [
+										"{{base_url}}"
+									],
+									"path": [
+										"api",
+										"admin",
+										"redial-queue",
+										"start"
+									]
+								},
+								"description": "Start the redial queue processor. Resume redial processing."
+							},
+							"response": []
+						},
+						{
+							"name": "Stop Redial Queue",
+							"request": {
+								"method": "POST",
+								"header": [
+									{
+										"key": "x-api-key",
+										"value": "{{admin_api_key}}",
+										"type": "text"
+									}
+								],
+								"url": {
+									"raw": "{{base_url}}/api/admin/redial-queue/stop",
+									"host": [
+										"{{base_url}}"
+									],
+									"path": [
+										"api",
+										"admin",
+										"redial-queue",
+										"stop"
+									]
+								},
+								"description": "Stop the redial queue processor. Pause redial processing."
+							},
+							"response": []
+						},
+						{
+							"name": "Process Redial Queue",
+							"request": {
+								"method": "POST",
+								"header": [
+									{
+										"key": "x-api-key",
+										"value": "{{admin_api_key}}",
+										"type": "text"
+									}
+								],
+								"url": {
+									"raw": "{{base_url}}/api/admin/redial-queue/process",
+									"host": [
+										"{{base_url}}"
+									],
+									"path": [
+										"api",
+										"admin",
+										"redial-queue",
+										"process"
+									]
+								},
+								"description": "Manually trigger redial queue processing. Force immediate processing."
+							},
+							"response": []
+						},
+						{
+							"name": "Enable Redial Queue",
+							"request": {
+								"method": "POST",
+								"header": [
+									{
+										"key": "x-api-key",
+										"value": "{{admin_api_key}}",
+										"type": "text"
+									}
+								],
+								"url": {
+									"raw": "{{base_url}}/api/admin/redial-queue/enable",
+									"host": [
+										"{{base_url}}"
+									],
+									"path": [
+										"api",
+										"admin",
+										"redial-queue",
+										"enable"
+									]
+								},
+								"description": "Enable redial queue (auto-start). Activate redial functionality."
+							},
+							"response": []
+						},
+						{
+							"name": "Disable Redial Queue",
+							"request": {
+								"method": "POST",
+								"header": [
+									{
+										"key": "x-api-key",
+										"value": "{{admin_api_key}}",
+										"type": "text"
+									}
+								],
+								"url": {
+									"raw": "{{base_url}}/api/admin/redial-queue/disable",
+									"host": [
+										"{{base_url}}"
+									],
+									"path": [
+										"api",
+										"admin",
+										"redial-queue",
+										"disable"
+									]
+								},
+								"description": "Disable redial queue. Deactivate redial functionality."
+							},
+							"response": []
+						},
+						{
+							"name": "Remove Lead from Queue",
+							"request": {
+								"method": "DELETE",
+								"header": [
+									{
+										"key": "x-api-key",
+										"value": "{{admin_api_key}}",
+										"type": "text"
+									}
+								],
+								"url": {
+									"raw": "{{base_url}}/api/admin/redial-queue/lead/:lead_id?phone=5551234567",
+									"host": [
+										"{{base_url}}"
+									],
+									"path": [
+										"api",
+										"admin",
+										"redial-queue",
+										"lead",
+										":lead_id"
+									],
+									"query": [
+										{
+											"key": "phone",
+											"value": "5551234567",
+											"description": "Phone number (required)"
+										}
+									],
+									"variable": [
+										{
+											"key": "lead_id",
+											"value": "12345"
+										}
+									]
+								},
+								"description": "Remove specific lead from redial queue. Requires phone query param."
+							},
+							"response": []
+						},
+						{
+							"name": "Pause Lead Redialing",
+							"request": {
+								"method": "POST",
+								"header": [
+									{
+										"key": "x-api-key",
+										"value": "{{admin_api_key}}",
+										"type": "text"
+									}
+								],
+								"url": {
+									"raw": "{{base_url}}/api/admin/redial-queue/lead/:lead_id/pause?phone=5551234567",
+									"host": [
+										"{{base_url}}"
+									],
+									"path": [
+										"api",
+										"admin",
+										"redial-queue",
+										"lead",
+										":lead_id",
+										"pause"
+									],
+									"query": [
+										{
+											"key": "phone",
+											"value": "5551234567",
+											"description": "Phone number (required)"
+										}
+									],
+									"variable": [
+										{
+											"key": "lead_id",
+											"value": "12345"
+										}
+									]
+								},
+								"description": "Temporarily pause redialing for a lead. Requires phone query param."
+							},
+							"response": []
+						},
+						{
+							"name": "Resume Lead Redialing",
+							"request": {
+								"method": "POST",
+								"header": [
+									{
+										"key": "x-api-key",
+										"value": "{{admin_api_key}}",
+										"type": "text"
+									}
+								],
+								"url": {
+									"raw": "{{base_url}}/api/admin/redial-queue/lead/:lead_id/resume?phone=5551234567",
+									"host": [
+										"{{base_url}}"
+									],
+									"path": [
+										"api",
+										"admin",
+										"redial-queue",
+										"lead",
+										":lead_id",
+										"resume"
+									],
+									"query": [
+										{
+											"key": "phone",
+											"value": "5551234567",
+											"description": "Phone number (required)"
+										}
+									],
+									"variable": [
+										{
+											"key": "lead_id",
+											"value": "12345"
+										}
+									]
+								},
+								"description": "Resume redialing for paused lead. Requires phone query param."
+							},
+							"response": []
+						},
+						{
+							"name": "Cleanup Old Files",
+							"request": {
+								"method": "POST",
+								"header": [
+									{
+										"key": "x-api-key",
+										"value": "{{admin_api_key}}",
+										"type": "text"
+									}
+								],
+								"url": {
+									"raw": "{{base_url}}/api/admin/redial-queue/cleanup",
+									"host": [
+										"{{base_url}}"
+									],
+									"path": [
+										"api",
+										"admin",
+										"redial-queue",
+										"cleanup"
+									]
+								},
+								"description": "Clean up old redial queue files beyond retention period. Free disk space."
+							},
+							"response": []
+						}
+					],
+					"description": "Redial queue endpoints for managing automatic redialing of voicemail/no-answer leads."
+				},
+				{
+					"name": "Queue Processor",
+					"item": [
+						{
+							"name": "Get Processor Status",
+							"request": {
+								"method": "GET",
+								"header": [
+									{
+										"key": "x-api-key",
+										"value": "{{admin_api_key}}",
+										"type": "text"
+									}
+								],
+								"url": {
+									"raw": "{{base_url}}/api/admin/queue-processor/status",
+									"host": [
+										"{{base_url}}"
+									],
+									"path": [
+										"api",
+										"admin",
+										"queue-processor",
+										"status"
+									]
+								},
+								"description": "Get queue processor status. Returns enabled, running, last processed."
+							},
+							"response": []
+						},
+						{
+							"name": "Process Queue",
+							"request": {
+								"method": "POST",
+								"header": [
+									{
+										"key": "x-api-key",
+										"value": "{{admin_api_key}}",
+										"type": "text"
+									}
+								],
+								"url": {
+									"raw": "{{base_url}}/api/admin/queue-processor/process",
+									"host": [
+										"{{base_url}}"
+									],
+									"path": [
+										"api",
+										"admin",
+										"queue-processor",
+										"process"
+									]
+								},
+								"description": "Manually trigger queue processing. Force immediate processing."
+							},
+							"response": []
+						},
+						{
+							"name": "Get Processor Config",
+							"request": {
+								"method": "GET",
+								"header": [
+									{
+										"key": "x-api-key",
+										"value": "{{admin_api_key}}",
+										"type": "text"
+									}
+								],
+								"url": {
+									"raw": "{{base_url}}/api/admin/queue-processor/config",
+									"host": [
+										"{{base_url}}"
+									],
+									"path": [
+										"api",
+										"admin",
+										"queue-processor",
+										"config"
+									]
+								},
+								"description": "Get queue processor configuration."
+							},
+							"response": []
+						},
+						{
+							"name": "Update Processor Config",
+							"request": {
+								"method": "PUT",
+								"header": [
+									{
+										"key": "x-api-key",
+										"value": "{{admin_api_key}}",
+										"type": "text"
+									},
+									{
+										"key": "Content-Type",
+										"value": "application/json"
+									}
+								],
+								"body": {
+									"mode": "raw",
+									"raw": "{\n  \"enabled\": true,\n  \"intervalMinutes\": 5\n}"
+								},
+								"url": {
+									"raw": "{{base_url}}/api/admin/queue-processor/config",
+									"host": [
+										"{{base_url}}"
+									],
+									"path": [
+										"api",
+										"admin",
+										"queue-processor",
+										"config"
+									]
+								},
+								"description": "Update queue processor configuration."
+							},
+							"response": []
+						},
+						{
+							"name": "Start Processor",
+							"request": {
+								"method": "POST",
+								"header": [
+									{
+										"key": "x-api-key",
+										"value": "{{admin_api_key}}",
+										"type": "text"
+									}
+								],
+								"url": {
+									"raw": "{{base_url}}/api/admin/queue-processor/start",
+									"host": [
+										"{{base_url}}"
+									],
+									"path": [
+										"api",
+										"admin",
+										"queue-processor",
+										"start"
+									]
+								},
+								"description": "Start queue processor."
+							},
+							"response": []
+						},
+						{
+							"name": "Stop Processor",
+							"request": {
+								"method": "POST",
+								"header": [
+									{
+										"key": "x-api-key",
+										"value": "{{admin_api_key}}",
+										"type": "text"
+									}
+								],
+								"url": {
+									"raw": "{{base_url}}/api/admin/queue-processor/stop",
+									"host": [
+										"{{base_url}}"
+									],
+									"path": [
+										"api",
+										"admin",
+										"queue-processor",
+										"stop"
+									]
+								},
+								"description": "Stop queue processor."
+							},
+							"response": []
+						},
+						{
+							"name": "Enable Processor",
+							"request": {
+								"method": "POST",
+								"header": [
+									{
+										"key": "x-api-key",
+										"value": "{{admin_api_key}}",
+										"type": "text"
+									}
+								],
+								"url": {
+									"raw": "{{base_url}}/api/admin/queue-processor/enable",
+									"host": [
+										"{{base_url}}"
+									],
+									"path": [
+										"api",
+										"admin",
+										"queue-processor",
+										"enable"
+									]
+								},
+								"description": "Enable queue processor (auto-start)."
+							},
+							"response": []
+						},
+						{
+							"name": "Disable Processor",
+							"request": {
+								"method": "POST",
+								"header": [
+									{
+										"key": "x-api-key",
+										"value": "{{admin_api_key}}",
+										"type": "text"
+									}
+								],
+								"url": {
+									"raw": "{{base_url}}/api/admin/queue-processor/disable",
+									"host": [
+										"{{base_url}}"
+									],
+									"path": [
+										"api",
+										"admin",
+										"queue-processor",
+										"disable"
+									]
+								},
+								"description": "Disable queue processor."
+							},
+							"response": []
+						}
+					],
+					"description": "Queue processor endpoints for managing background queue processing."
+				}
+			],
+			"description": "Queue management endpoints for scheduler, redial queue, and queue processor."
+		},
+		{
+			"name": "6. Admin - Blocklist",
+			"item": [
+				{
+					"name": "Get Blocklist",
+					"request": {
+						"method": "GET",
+						"header": [
+							{
+								"key": "x-api-key",
+								"value": "{{admin_api_key}}",
+								"type": "text"
+							}
+						],
+						"url": {
+							"raw": "{{base_url}}/api/admin/blocklist",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"api",
+								"admin",
+								"blocklist"
+							]
+						},
+						"description": "Get all blocklist flags and configuration. Returns enabled status, count, and all flags."
+					},
+					"response": []
+				},
+				{
+					"name": "Add to Blocklist",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "x-api-key",
+								"value": "{{admin_api_key}}",
+								"type": "text"
+							},
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"field\": \"phone_number\",\n  \"value\": \"5551234567\",\n  \"reason\": \"Customer requested DNC\"\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/api/admin/blocklist",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"api",
+								"admin",
+								"blocklist"
+							]
+						},
+						"description": "Add new blocklist flag. Blocks phone number or email."
+					},
+					"response": []
+				},
+				{
+					"name": "Remove from Blocklist",
+					"request": {
+						"method": "DELETE",
+						"header": [
+							{
+								"key": "x-api-key",
+								"value": "{{admin_api_key}}",
+								"type": "text"
+							}
+						],
+						"url": {
+							"raw": "{{base_url}}/api/admin/blocklist/:flagId",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"api",
+								"admin",
+								"blocklist",
+								":flagId"
+							],
+							"variable": [
+								{
+									"key": "flagId",
+									"value": "flag_xyz123"
+								}
+							]
+						},
+						"description": "Remove blocklist flag by ID. Unblock incorrectly blocked entry."
+					},
+					"response": []
+				},
+				{
+					"name": "Enable/Disable Blocklist",
+					"request": {
+						"method": "PUT",
+						"header": [
+							{
+								"key": "x-api-key",
+								"value": "{{admin_api_key}}",
+								"type": "text"
+							},
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"enabled\": true\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/api/admin/blocklist/enabled",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"api",
+								"admin",
+								"blocklist",
+								"enabled"
+							]
+						},
+						"description": "Enable or disable entire blocklist. Temporarily disable blocking."
+					},
+					"response": []
+				},
+				{
+					"name": "Get Blocked Attempts Today",
+					"request": {
+						"method": "GET",
+						"header": [
+							{
+								"key": "x-api-key",
+								"value": "{{admin_api_key}}",
+								"type": "text"
+							}
+						],
+						"url": {
+							"raw": "{{base_url}}/api/admin/blocklist/attempts/today",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"api",
+								"admin",
+								"blocklist",
+								"attempts",
+								"today"
+							]
+						},
+						"description": "Get today's blocked call attempts. Monitor blocklist effectiveness."
+					},
+					"response": []
+				},
+				{
+					"name": "Get Blocked Attempts for Date",
+					"request": {
+						"method": "GET",
+						"header": [
+							{
+								"key": "x-api-key",
+								"value": "{{admin_api_key}}",
+								"type": "text"
+							}
+						],
+						"url": {
+							"raw": "{{base_url}}/api/admin/blocklist/attempts/:date",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"api",
+								"admin",
+								"blocklist",
+								"attempts",
+								":date"
+							],
+							"variable": [
+								{
+									"key": "date",
+									"value": "2026-01-13",
+									"description": "Format: YYYY-MM-DD"
+								}
+							]
+						},
+						"description": "Get blocked attempts for specific date. Historical analysis."
+					},
+					"response": []
+				},
+				{
+					"name": "Get Blocklist Statistics",
+					"request": {
+						"method": "GET",
+						"header": [
+							{
+								"key": "x-api-key",
+								"value": "{{admin_api_key}}",
+								"type": "text"
+							}
+						],
+						"url": {
+							"raw": "{{base_url}}/api/admin/blocklist/statistics?start=2026-01-01&end=2026-01-13",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"api",
+								"admin",
+								"blocklist",
+								"statistics"
+							],
+							"query": [
+								{
+									"key": "start",
+									"value": "2026-01-01",
+									"description": "Start date (YYYY-MM-DD)"
+								},
+								{
+									"key": "end",
+									"value": "2026-01-13",
+									"description": "End date (YYYY-MM-DD)"
+								}
+							]
+						},
+						"description": "Get blocklist statistics for date range. Analyze blocking trends."
+					},
+					"response": []
+				}
+			],
+			"description": "Blocklist management endpoints for DNC/TCPA compliance."
+		},
+		{
+			"name": "7. Admin - Reports",
+			"item": [
+				{
+					"name": "Webhook Logs",
+					"item": [
+						{
+							"name": "Get Today's Webhook Logs",
+							"request": {
+								"method": "GET",
+								"header": [
+									{
+										"key": "x-api-key",
+										"value": "{{admin_api_key}}",
+										"type": "text"
+									}
+								],
+								"url": {
+									"raw": "{{base_url}}/api/admin/webhook-logs/today",
+									"host": [
+										"{{base_url}}"
+									],
+									"path": [
+										"api",
+										"admin",
+										"webhook-logs",
+										"today"
+									]
+								},
+								"description": "Get today's webhook logs with stats. Monitor webhook activity."
+							},
+							"response": []
+						},
+						{
+							"name": "Get Webhook Logs for Date",
+							"request": {
+								"method": "GET",
+								"header": [
+									{
+										"key": "x-api-key",
+										"value": "{{admin_api_key}}",
+										"type": "text"
+									}
+								],
+								"url": {
+									"raw": "{{base_url}}/api/admin/webhook-logs/:date",
+									"host": [
+										"{{base_url}}"
+									],
+									"path": [
+										"api",
+										"admin",
+										"webhook-logs",
+										":date"
+									],
+									"variable": [
+										{
+											"key": "date",
+											"value": "2026-01-13",
+											"description": "Format: YYYY-MM-DD"
+										}
+									]
+								},
+								"description": "Get webhook logs for specific date. Historical analysis."
+							},
+							"response": []
+						},
+						{
+							"name": "Search by Phone Number",
+							"request": {
+								"method": "GET",
+								"header": [
+									{
+										"key": "x-api-key",
+										"value": "{{admin_api_key}}",
+										"type": "text"
+									}
+								],
+								"url": {
+									"raw": "{{base_url}}/api/admin/webhook-logs/search/phone/:phoneNumber",
+									"host": [
+										"{{base_url}}"
+									],
+									"path": [
+										"api",
+										"admin",
+										"webhook-logs",
+										"search",
+										"phone",
+										":phoneNumber"
+									],
+									"variable": [
+										{
+											"key": "phoneNumber",
+											"value": "5551234567"
+										}
+									]
+								},
+								"description": "Search webhook logs by phone number. Troubleshoot specific customer."
+							},
+							"response": []
+						},
+						{
+							"name": "Search by Lead ID",
+							"request": {
+								"method": "GET",
+								"header": [
+									{
+										"key": "x-api-key",
+										"value": "{{admin_api_key}}",
+										"type": "text"
+									}
+								],
+								"url": {
+									"raw": "{{base_url}}/api/admin/webhook-logs/search/lead/:leadId",
+									"host": [
+										"{{base_url}}"
+									],
+									"path": [
+										"api",
+										"admin",
+										"webhook-logs",
+										"search",
+										"lead",
+										":leadId"
+									],
+									"variable": [
+										{
+											"key": "leadId",
+											"value": "12345"
+										}
+									]
+								},
+								"description": "Search webhook logs by lead_id. Track lead journey."
+							},
+							"response": []
+						}
+					],
+					"description": "Webhook log access for monitoring and troubleshooting."
+				},
+				{
+					"name": "Reconciliation",
+					"item": [
+						{
+							"name": "Generate Report for Date",
+							"request": {
+								"method": "POST",
+								"header": [
+									{
+										"key": "x-api-key",
+										"value": "{{admin_api_key}}",
+										"type": "text"
+									}
+								],
+								"url": {
+									"raw": "{{base_url}}/api/admin/reconciliation/generate/:date",
+									"host": [
+										"{{base_url}}"
+									],
+									"path": [
+										"api",
+										"admin",
+										"reconciliation",
+										"generate",
+										":date"
+									],
+									"variable": [
+										{
+											"key": "date",
+											"value": "2026-01-13",
+											"description": "Format: YYYY-MM-DD"
+										}
+									]
+								},
+								"description": "Generate reconciliation report for specific date. Daily reconciliation."
+							},
+							"response": []
+						},
+						{
+							"name": "Generate Today's Report",
+							"request": {
+								"method": "POST",
+								"header": [
+									{
+										"key": "x-api-key",
+										"value": "{{admin_api_key}}",
+										"type": "text"
+									}
+								],
+								"url": {
+									"raw": "{{base_url}}/api/admin/reconciliation/generate-today",
+									"host": [
+										"{{base_url}}"
+									],
+									"path": [
+										"api",
+										"admin",
+										"reconciliation",
+										"generate-today"
+									]
+								},
+								"description": "Generate reconciliation report for today. Quick daily reconciliation."
+							},
+							"response": []
+						},
+						{
+							"name": "Get Report",
+							"request": {
+								"method": "GET",
+								"header": [
+									{
+										"key": "x-api-key",
+										"value": "{{admin_api_key}}",
+										"type": "text"
+									}
+								],
+								"url": {
+									"raw": "{{base_url}}/api/admin/reconciliation/:date",
+									"host": [
+										"{{base_url}}"
+									],
+									"path": [
+										"api",
+										"admin",
+										"reconciliation",
+										":date"
+									],
+									"variable": [
+										{
+											"key": "date",
+											"value": "2026-01-13",
+											"description": "Format: YYYY-MM-DD"
+										}
+									]
+								},
+								"description": "Get existing reconciliation report. Review past reconciliation."
+							},
+							"response": []
+						},
+						{
+							"name": "List All Reports",
+							"request": {
+								"method": "GET",
+								"header": [
+									{
+										"key": "x-api-key",
+										"value": "{{admin_api_key}}",
+										"type": "text"
+									}
+								],
+								"url": {
+									"raw": "{{base_url}}/api/admin/reconciliation/list/all",
+									"host": [
+										"{{base_url}}"
+									],
+									"path": [
+										"api",
+										"admin",
+										"reconciliation",
+										"list",
+										"all"
+									]
+								},
+								"description": "Get list of all available reconciliation reports."
+							},
+							"response": []
+						}
+					],
+					"description": "Reconciliation report endpoints for daily system reconciliation."
+				},
+				{
+					"name": "Daily Reports",
+					"item": [
+						{
+							"name": "Generate Report for Date",
+							"request": {
+								"method": "POST",
+								"header": [
+									{
+										"key": "x-api-key",
+										"value": "{{admin_api_key}}",
+										"type": "text"
+									}
+								],
+								"url": {
+									"raw": "{{base_url}}/api/admin/daily-report/generate/:date",
+									"host": [
+										"{{base_url}}"
+									],
+									"path": [
+										"api",
+										"admin",
+										"daily-report",
+										"generate",
+										":date"
+									],
+									"variable": [
+										{
+											"key": "date",
+											"value": "2026-01-13",
+											"description": "Format: YYYY-MM-DD"
+										}
+									]
+								},
+								"description": "Generate comprehensive daily report for specific date. End of day reporting."
+							},
+							"response": []
+						},
+						{
+							"name": "Generate Today's Report",
+							"request": {
+								"method": "POST",
+								"header": [
+									{
+										"key": "x-api-key",
+										"value": "{{admin_api_key}}",
+										"type": "text"
+									}
+								],
+								"url": {
+									"raw": "{{base_url}}/api/admin/daily-report/generate-today",
+									"host": [
+										"{{base_url}}"
+									],
+									"path": [
+										"api",
+										"admin",
+										"daily-report",
+										"generate-today"
+									]
+								},
+								"description": "Generate daily report for today. Quick end-of-day summary."
+							},
+							"response": []
+						},
+						{
+							"name": "Get Report",
+							"request": {
+								"method": "GET",
+								"header": [
+									{
+										"key": "x-api-key",
+										"value": "{{admin_api_key}}",
+										"type": "text"
+									}
+								],
+								"url": {
+									"raw": "{{base_url}}/api/admin/daily-report/:date",
+									"host": [
+										"{{base_url}}"
+									],
+									"path": [
+										"api",
+										"admin",
+										"daily-report",
+										":date"
+									],
+									"variable": [
+										{
+											"key": "date",
+											"value": "2026-01-13",
+											"description": "Format: YYYY-MM-DD"
+										}
+									]
+								},
+								"description": "Get existing daily report. Review past performance."
+							},
+							"response": []
+						}
+					],
+					"description": "Daily report endpoints for comprehensive performance reporting."
+				}
+			],
+			"description": "Reporting endpoints for logs, reconciliation, and daily reports."
+		},
+		{
+			"name": "8. Admin - Analytics",
+			"item": [
+				{
+					"name": "Get Leads by Date",
+					"request": {
+						"method": "GET",
+						"header": [
+							{
+								"key": "x-api-key",
+								"value": "{{admin_api_key}}",
+								"type": "text"
+							}
+						],
+						"url": {
+							"raw": "{{base_url}}/api/admin/analytics/leads-by-date?date=2026-01-14",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"api",
+								"admin",
+								"analytics",
+								"leads-by-date"
+							],
+							"query": [
+								{
+									"key": "date",
+									"value": "2026-01-14",
+									"description": "Date in YYYY-MM-DD format"
+								}
+							]
+						},
+						"description": "Get all leads added on a specific date. Shows unique leads, total leads, source (new vs redial), scheduled callbacks. Returns leads with categorization and full details."
+					},
+					"response": []
+				},
+				{
+					"name": "Get Leads by Batch",
+					"request": {
+						"method": "GET",
+						"header": [
+							{
+								"key": "x-api-key",
+								"value": "{{admin_api_key}}",
+								"type": "text"
+							}
+						],
+						"url": {
+							"raw": "{{base_url}}/api/admin/analytics/leads-by-batch?window_minutes=5&limit=10",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"api",
+								"admin",
+								"analytics",
+								"leads-by-batch"
+							],
+							"query": [
+								{
+									"key": "window_minutes",
+									"value": "5",
+									"description": "Time window to group leads (default: 5)"
+								},
+								{
+									"key": "limit",
+									"value": "10",
+									"description": "Max number of batches to return (default: 10, 0 for all)"
+								}
+							]
+						},
+						"description": "Get leads grouped by batch time window. Identifies bulk imports from Convoso by grouping leads added within the same time window. Returns batch time, lead count, and lead details."
+					},
+					"response": []
+				},
+				{
+					"name": "Get Scheduled Callbacks",
+					"request": {
+						"method": "GET",
+						"header": [
+							{
+								"key": "x-api-key",
+								"value": "{{admin_api_key}}",
+								"type": "text"
+							}
+						],
+						"url": {
+							"raw": "{{base_url}}/api/admin/analytics/scheduled-callbacks",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"api",
+								"admin",
+								"analytics",
+								"scheduled-callbacks"
+							]
+						},
+						"description": "Get all leads with scheduled callback requests. Shows callback time, lead details, status, and whether callbacks are past due. Returns categorized upcoming and past due callbacks."
+					},
+					"response": []
+				},
+				{
+					"name": "Get Lead Source",
+					"request": {
+						"method": "GET",
+						"header": [
+							{
+								"key": "x-api-key",
+								"value": "{{admin_api_key}}",
+								"type": "text"
+							}
+						],
+						"url": {
+							"raw": "{{base_url}}/api/admin/analytics/lead-source?phone=5551234567",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"api",
+								"admin",
+								"analytics",
+								"lead-source"
+							],
+							"query": [
+								{
+									"key": "phone",
+									"value": "5551234567",
+									"description": "Phone number to lookup (required)"
+								}
+							]
+						},
+						"description": "Track if a specific lead was new or came from redial queue. Shows creation date, complete call history, source determination (new_lead vs redial_queue), and full call statistics."
+					},
+					"response": []
+				},
+				{
+					"name": "Get Daily Summary",
+					"request": {
+						"method": "GET",
+						"header": [
+							{
+								"key": "x-api-key",
+								"value": "{{admin_api_key}}",
+								"type": "text"
+							}
+						],
+						"url": {
+							"raw": "{{base_url}}/api/admin/analytics/daily-summary?date=2026-01-14",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"api",
+								"admin",
+								"analytics",
+								"daily-summary"
+							],
+							"query": [
+								{
+									"key": "date",
+									"value": "2026-01-14",
+									"description": "Date in YYYY-MM-DD format (optional, defaults to today)"
+								}
+							]
+						},
+						"description": "Comprehensive daily summary report. Shows new leads, redials, outcomes breakdown, status breakdown, scheduled callbacks, pool number usage, and top batches. Perfect for daily reporting and tracking trends."
+					},
+					"response": []
+				}
+			],
+			"description": "Lead tracking and analytics endpoints for understanding lead flow, batch imports, callbacks, and daily summaries."
+		},
+		{
+			"name": "9. Admin - Test Mode",
+			"item": [
+				{
+					"name": "Check Test Mode Status",
+					"request": {
+						"method": "GET",
+						"header": [
+							{
+								"key": "x-api-key",
+								"value": "{{admin_api_key}}",
+								"type": "text"
+							}
+						],
+						"url": {
+							"raw": "{{base_url}}/api/admin/test/status",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"api",
+								"admin",
+								"test",
+								"status"
+							]
+						},
+						"description": "Check if test mode is enabled. Verify test environment."
+					},
+					"response": []
+				},
+				{
+					"name": "Reset SMS Tracker",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "x-api-key",
+								"value": "{{admin_api_key}}",
+								"type": "text"
+							}
+						],
+						"url": {
+							"raw": "{{base_url}}/api/admin/test/reset-sms-tracker",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"api",
+								"admin",
+								"test",
+								"reset-sms-tracker"
+							]
+						},
+						"description": "Reset SMS tracker for testing. Requires TEST_MODE_ALLOW_SMS_RESET=true."
+					},
+					"response": []
+				},
+				{
+					"name": "Reset Daily Counters",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "x-api-key",
+								"value": "{{admin_api_key}}",
+								"type": "text"
+							}
+						],
+						"url": {
+							"raw": "{{base_url}}/api/admin/test/reset-daily-counters",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"api",
+								"admin",
+								"test",
+								"reset-daily-counters"
+							]
+						},
+						"description": "Reset daily call attempt counters. Requires TEST_MODE_ENABLED=true."
+					},
+					"response": []
+				},
+				{
+					"name": "Trigger Test Call",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "x-api-key",
+								"value": "{{admin_api_key}}",
+								"type": "text"
+							},
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"phone_number\": \"5551234567\",\n  \"first_name\": \"Test\",\n  \"last_name\": \"User\"\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/api/admin/test/trigger-call",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"api",
+								"admin",
+								"test",
+								"trigger-call"
+							]
+						},
+						"description": "Manually trigger a test call. Requires TEST_MODE_ENABLED=true."
+					},
+					"response": []
+				}
+			],
+			"description": "Test mode endpoints for development and testing (requires TEST_MODE_ENABLED=true)."
+		}
+	],
+	"event": [
+		{
+			"listen": "prerequest",
+			"script": {
+				"type": "text/javascript",
+				"exec": [
+					""
+				]
+			}
+		},
+		{
+			"listen": "test",
+			"script": {
+				"type": "text/javascript",
+				"exec": [
+					""
+				]
+			}
+		}
+	],
+	"variable": [
+		{
+			"key": "base_url",
+			"value": "http://localhost:3000",
+			"type": "string"
+		},
+		{
+			"key": "admin_api_key",
+			"value": "awh_admin_2024_secure_key_change_in_production",
+			"type": "string"
+		}
+	]
+}

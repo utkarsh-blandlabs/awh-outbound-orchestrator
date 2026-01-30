@@ -1,0 +1,262 @@
+{
+  "info": {
+    "_postman_id": "bad-numbers-api-collection",
+    "name": "AWH Orchestrator - Bad Numbers API",
+    "description": "API endpoints for managing permanently failed phone numbers (e.g., 'number not found' errors)",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    {
+      "key": "base_url",
+      "value": "https://client.blandlabs.ai",
+      "type": "string"
+    },
+    {
+      "key": "api_key",
+      "value": "24xj5nKkOsD0SNmWNVDRgdcn99x4eCfL",
+      "type": "string"
+    }
+  ],
+  "item": [
+    {
+      "name": "Bad Numbers",
+      "item": [
+        {
+          "name": "Get Bad Numbers Stats",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "x-api-key",
+                "value": "{{api_key}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/api/admin/bad-numbers/stats",
+              "host": ["{{base_url}}"],
+              "path": ["api", "admin", "bad-numbers", "stats"]
+            },
+            "description": "Get statistics about bad numbers including:\n- Total count\n- Added today/this week/this month\n- Breakdown by error type\n- Most recent entries"
+          },
+          "response": []
+        },
+        {
+          "name": "List All Bad Numbers",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "x-api-key",
+                "value": "{{api_key}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/api/admin/bad-numbers?limit=100&offset=0&sortBy=last_failed_at&sortOrder=desc",
+              "host": ["{{base_url}}"],
+              "path": ["api", "admin", "bad-numbers"],
+              "query": [
+                {
+                  "key": "limit",
+                  "value": "100",
+                  "description": "Number of records to return (default: 100)"
+                },
+                {
+                  "key": "offset",
+                  "value": "0",
+                  "description": "Pagination offset (default: 0)"
+                },
+                {
+                  "key": "sortBy",
+                  "value": "last_failed_at",
+                  "description": "Sort field: first_failed_at, last_failed_at, or failure_count"
+                },
+                {
+                  "key": "sortOrder",
+                  "value": "desc",
+                  "description": "Sort order: asc or desc"
+                },
+                {
+                  "key": "errorContains",
+                  "value": "",
+                  "description": "Filter by error message (optional)",
+                  "disabled": true
+                },
+                {
+                  "key": "addedAfter",
+                  "value": "",
+                  "description": "Filter: added after this timestamp (optional)",
+                  "disabled": true
+                },
+                {
+                  "key": "addedBefore",
+                  "value": "",
+                  "description": "Filter: added before this timestamp (optional)",
+                  "disabled": true
+                }
+              ]
+            },
+            "description": "Get all bad numbers with optional filtering and pagination"
+          },
+          "response": []
+        },
+        {
+          "name": "Check Single Phone Number",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "x-api-key",
+                "value": "{{api_key}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/api/admin/bad-numbers/check/8165555252",
+              "host": ["{{base_url}}"],
+              "path": ["api", "admin", "bad-numbers", "check", "8165555252"]
+            },
+            "description": "Check if a specific phone number is in the bad numbers list.\n\nReplace '8165555252' with the phone number you want to check."
+          },
+          "response": []
+        },
+        {
+          "name": "Check Multiple Phone Numbers (Bulk)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "x-api-key",
+                "value": "{{api_key}}",
+                "type": "text"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"phone_numbers\": [\n    \"8165555252\",\n    \"2202133088\",\n    \"6176567789\",\n    \"5551234567\"\n  ]\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/admin/bad-numbers/check-bulk",
+              "host": ["{{base_url}}"],
+              "path": ["api", "admin", "bad-numbers", "check-bulk"]
+            },
+            "description": "Check multiple phone numbers at once.\n\nReturns which numbers are bad and which are good."
+          },
+          "response": []
+        },
+        {
+          "name": "Add Bad Number (Manual)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "x-api-key",
+                "value": "{{api_key}}",
+                "type": "text"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"phone_number\": \"5551234567\",\n  \"lead_id\": \"12345\",\n  \"error_message\": \"Manually flagged as bad number\",\n  \"notes\": \"Customer confirmed number is disconnected\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/admin/bad-numbers",
+              "host": ["{{base_url}}"],
+              "path": ["api", "admin", "bad-numbers"]
+            },
+            "description": "Manually add a phone number to the bad numbers list.\n\nRequired fields:\n- phone_number\n- lead_id\n- error_message\n\nOptional:\n- notes"
+          },
+          "response": []
+        },
+        {
+          "name": "Remove Bad Number",
+          "request": {
+            "method": "DELETE",
+            "header": [
+              {
+                "key": "x-api-key",
+                "value": "{{api_key}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/api/admin/bad-numbers/8165555252?reason=Verified as working number",
+              "host": ["{{base_url}}"],
+              "path": ["api", "admin", "bad-numbers", "8165555252"],
+              "query": [
+                {
+                  "key": "reason",
+                  "value": "Verified as working number",
+                  "description": "Optional reason for removal"
+                }
+              ]
+            },
+            "description": "Remove a phone number from the bad numbers list (if verified as good).\n\nReplace '8165555252' with the phone number to remove."
+          },
+          "response": []
+        },
+        {
+          "name": "Update Notes for Bad Number",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "x-api-key",
+                "value": "{{api_key}}",
+                "type": "text"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"notes\": \"Checked with carrier - number is permanently disconnected\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/admin/bad-numbers/8165555252/notes",
+              "host": ["{{base_url}}"],
+              "path": ["api", "admin", "bad-numbers", "8165555252", "notes"]
+            },
+            "description": "Add or update notes for a bad number record.\n\nReplace '8165555252' with the phone number."
+          },
+          "response": []
+        },
+        {
+          "name": "Export Bad Numbers as CSV",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "x-api-key",
+                "value": "{{api_key}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/api/admin/bad-numbers/export",
+              "host": ["{{base_url}}"],
+              "path": ["api", "admin", "bad-numbers", "export"]
+            },
+            "description": "Export all bad numbers as a CSV file.\n\nColumns: phone_number, lead_id, lead_name, list_id, error_message, first_failed_at, last_failed_at, failure_count, source, notes"
+          },
+          "response": []
+        }
+      ],
+      "description": "Endpoints for managing permanently failed phone numbers"
+    }
+  ]
+}
