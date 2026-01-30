@@ -17,6 +17,7 @@ import reconciliationRouter from "./routes/reconciliationRoutes";
 import dailyReportRouter from "./routes/dailyReportRoutes";
 import bulkOperationsRouter from "./routes/bulkOperationsRoutes";
 import blandConfigRouter from "./routes/blandConfigRoutes";
+import reportAnalysisRouter from "./routes/reportAnalysisRoutes";
 import { versionService } from "./services/versionService";
 
 // Import services (they auto-start in their constructors)
@@ -162,6 +163,7 @@ app.use("/api/admin/reconciliation", reconciliationRouter);
 app.use("/api/admin/daily-report", dailyReportRouter);
 app.use("/api/admin/bulk", bulkOperationsRouter);
 app.use("/api/admin/bland-config", blandConfigRouter);
+app.use("/api/admin/report-analysis", reportAnalysisRouter);
 
 // 404 handler
 app.use((req: Request, res: Response) => {
