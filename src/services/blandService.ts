@@ -454,17 +454,16 @@ class BlandService {
   }
 
   /**
-   * Fetch a single hour's call logs from Bland API
-   * Returns only necessary fields to minimize memory usage
+   * Fetch a single page of call logs from Bland API
+   * Uses from/to offset pagination with start_date/end_date filtering.
    * @private
    */
-  private async fetchHourlyCallLogs(
-    date: string,
-    hour: number,
+  private async fetchCallPage(
+    offset: number,
+    pageSize: number,
+    dateParams?: { start_date: string; end_date?: string },
     pathwayId?: string
   ): Promise<{
-    hour: number;
-    hourLabel: string;
     calls: Array<{
       call_id: string;
       pathway_tags: string[];
@@ -472,54 +471,146 @@ class BlandService {
       answered_by: string;
       created_at: string;
     }>;
-    count: number;
-    hitLimit: boolean;
+    totalCount: number;
+    returned: number;
     error?: string;
   }> {
-    const hourStart = hour.toString().padStart(2, "0");
-    const hourEnd = hour === 23 ? "23:59:59.999" : `${(hour + 1).toString().padStart(2, "0")}:00:00.000`;
-
-    const fromDate = `${date}T${hourStart}:00:00.000Z`;
-    const toDate = `${date}T${hourEnd}Z`;
-
     const params: Record<string, any> = {
-      limit: 1000,
-      from_date: fromDate,
-      to_date: toDate,
+      from: offset,
+      to: offset + pageSize,
+      ...(dateParams?.start_date && { start_date: dateParams.start_date }),
+      ...(dateParams?.end_date && { end_date: dateParams.end_date }),
       ...(pathwayId && { pathway_id: pathwayId }),
     };
 
     try {
       const response = await this.client.get("/v1/calls", { params });
       const rawCalls = response.data.calls || [];
+      const totalCount = response.data.total_count || 0;
 
       // Process immediately to free raw response memory
-      // Only keep the fields we need
       const calls = rawCalls.map((call: any) => this.processCallObject(call));
 
       return {
-        hour,
-        hourLabel: `${hourStart}:00`,
         calls,
-        count: calls.length,
-        hitLimit: rawCalls.length >= 1000,
+        totalCount,
+        returned: calls.length,
       };
     } catch (error: any) {
       return {
-        hour,
-        hourLabel: `${hourStart}:00`,
         calls: [],
-        count: 0,
-        hitLimit: false,
+        totalCount: 0,
+        returned: 0,
         error: error.message,
       };
     }
   }
 
   /**
+   * Fetch ALL call logs using from/to pagination.
+   * Makes an initial request to get total_count, then fetches remaining pages in parallel.
+   * @private
+   */
+  private async fetchAllCallsPaginated(
+    dateParams?: { start_date: string; end_date?: string },
+    pathwayId?: string,
+    onPageComplete?: (pageData: {
+      page: number;
+      totalPages: number;
+      count: number;
+      totalSoFar: number;
+    }) => void
+  ): Promise<{
+    calls: Array<{
+      call_id: string;
+      pathway_tags: string[];
+      status: string;
+      answered_by: string;
+      created_at: string;
+    }>;
+    totalCount: number;
+    pagesUsed: number;
+  }> {
+    const PAGE_SIZE = 1000;
+    const MAX_PAGES = 100; // Safety cap: 100k calls max
+
+    // First request to get total_count and first page
+    const firstPage = await this.fetchCallPage(0, PAGE_SIZE, dateParams, pathwayId);
+
+    if (firstPage.error) {
+      logger.error("Failed to fetch first page of calls", { error: firstPage.error });
+      throw new Error(`Failed to fetch calls: ${firstPage.error}`);
+    }
+
+    const totalCount = firstPage.totalCount;
+    const totalPages = Math.min(Math.ceil(totalCount / PAGE_SIZE), MAX_PAGES);
+
+    logger.info("Paginated fetch started", {
+      totalCount,
+      totalPages,
+      firstPageReturned: firstPage.returned,
+      dateParams,
+    });
+
+    if (onPageComplete) {
+      onPageComplete({ page: 1, totalPages, count: firstPage.returned, totalSoFar: firstPage.returned });
+    }
+
+    // If first page has everything, return immediately
+    if (firstPage.returned < PAGE_SIZE || totalPages <= 1) {
+      return { calls: firstPage.calls, totalCount, pagesUsed: 1 };
+    }
+
+    // Fetch remaining pages in parallel (batches of 10 to avoid overwhelming the API)
+    const allCalls = [...firstPage.calls];
+    const seenCallIds = new Set(firstPage.calls.map((c) => c.call_id));
+    const PARALLEL_BATCH = 10;
+
+    for (let batchStart = 1; batchStart < totalPages; batchStart += PARALLEL_BATCH) {
+      const batchEnd = Math.min(batchStart + PARALLEL_BATCH, totalPages);
+      const pagePromises = [];
+
+      for (let page = batchStart; page < batchEnd; page++) {
+        pagePromises.push(this.fetchCallPage(page * PAGE_SIZE, PAGE_SIZE, dateParams, pathwayId));
+      }
+
+      const pageResults = await Promise.all(pagePromises);
+
+      for (let i = 0; i < pageResults.length; i++) {
+        const result = pageResults[i]!;
+        const pageNum = batchStart + i + 1;
+
+        if (result.error) {
+          logger.error("Failed to fetch page", { page: pageNum, error: result.error });
+          continue;
+        }
+
+        // Deduplicate
+        for (const call of result.calls) {
+          if (!seenCallIds.has(call.call_id)) {
+            seenCallIds.add(call.call_id);
+            allCalls.push(call);
+          }
+        }
+
+        if (onPageComplete) {
+          onPageComplete({ page: pageNum, totalPages, count: result.returned, totalSoFar: allCalls.length });
+        }
+      }
+
+      // Small delay between parallel batches to respect rate limits
+      if (batchEnd < totalPages) {
+        await this.sleep(200);
+      }
+    }
+
+    return { calls: allCalls, totalCount, pagesUsed: totalPages };
+  }
+
+  /**
    * Fetch call logs from Bland API for a specific date (PARALLEL - Fast)
-   * Uses hourly time chunking to bypass Bland API's 1000 call limit.
-   * Makes 24 API calls in parallel for speed.
+   * Uses from/to pagination with start_date/end_date filtering.
+   * Fetches first page to get total_count, then remaining pages in parallel.
    *
    * @param date - Date in YYYY-MM-DD format
    * @param pathwayId - Optional pathway ID filter (defaults to config pathway)
@@ -539,63 +630,31 @@ class BlandService {
   > {
     const targetPathwayId = pathwayId || config.bland.pathwayId;
 
-    logger.info("Fetching call logs from Bland (PARALLEL)", {
+    // end_date is exclusive in Bland API, so add one day
+    const endDate = new Date(date + "T00:00:00Z");
+    endDate.setUTCDate(endDate.getUTCDate() + 1);
+    const endDateStr = endDate.toISOString().split("T")[0];
+
+    logger.info("Fetching call logs from Bland (paginated)", {
       date,
+      end_date: endDateStr,
       pathway_id: targetPathwayId,
     });
 
-    const allCalls: Array<{
-      call_id: string;
-      pathway_tags: string[];
-      status: string;
-      answered_by: string;
-      created_at: string;
-    }> = [];
-    const seenCallIds = new Set<string>();
-
     try {
-      // Execute all 24 hours in parallel
-      const hourlyPromises = Array.from({ length: 24 }, (_, hour) =>
-        this.fetchHourlyCallLogs(date, hour, targetPathwayId)
+      const result = await this.fetchAllCallsPaginated(
+        { start_date: date, end_date: endDateStr },
+        targetPathwayId
       );
-      const hourlyResults = await Promise.all(hourlyPromises);
 
-      // Aggregate and deduplicate
-      for (const result of hourlyResults) {
-        if (result.error) {
-          logger.error("Failed to fetch calls for hour", {
-            date,
-            hour: result.hourLabel,
-            error: result.error,
-          });
-        } else {
-          logger.info("Fetched hourly chunk", {
-            date,
-            hour: result.hourLabel,
-            count: result.count,
-            hitLimit: result.hitLimit,
-          });
-
-          if (result.hitLimit) {
-            logger.warn("Hit 1000 call limit for hour", { date, hour: result.hourLabel });
-          }
-        }
-
-        // Calls are already processed - just deduplicate and add
-        for (const call of result.calls) {
-          if (!seenCallIds.has(call.call_id)) {
-            seenCallIds.add(call.call_id);
-            allCalls.push(call); // Already in correct format
-          }
-        }
-      }
-
-      logger.info("Finished fetching call logs (PARALLEL)", {
+      logger.info("Finished fetching call logs", {
         date,
-        total_calls: allCalls.length,
+        total_calls: result.calls.length,
+        total_count_api: result.totalCount,
+        pages_used: result.pagesUsed,
       });
 
-      return allCalls;
+      return result.calls;
     } catch (error: any) {
       logger.error("Failed to fetch call logs from Bland", {
         date,
@@ -607,23 +666,22 @@ class BlandService {
 
   /**
    * Fetch call logs from Bland API for a specific date (SEQUENTIAL - Detailed tracking)
-   * Fetches hour by hour with detailed logging and progress tracking.
-   * Use this for debugging or when you need per-hour visibility.
+   * Fetches page by page with detailed logging and progress tracking.
+   * Use this for debugging or when you need per-page visibility.
    *
    * @param date - Date in YYYY-MM-DD format
    * @param pathwayId - Optional pathway ID filter
-   * @param onHourComplete - Optional callback for each hour's progress
-   * @returns Object with calls array and hourly breakdown
+   * @param onPageComplete - Optional callback for each page's progress
+   * @returns Object with calls array and page breakdown
    */
   async getCallLogsByDateSequential(
     date: string,
     pathwayId?: string,
-    onHourComplete?: (hourData: {
-      hour: number;
-      hourLabel: string;
+    onPageComplete?: (pageData: {
+      page: number;
+      totalPages: number;
       count: number;
       totalSoFar: number;
-      hitLimit: boolean;
     }) => void
   ): Promise<{
     calls: Array<{
@@ -633,18 +691,25 @@ class BlandService {
       answered_by: string;
       created_at: string;
     }>;
-    hourlyBreakdown: Array<{
-      hour: number;
-      hourLabel: string;
+    pageBreakdown: Array<{
+      page: number;
       count: number;
-      hitLimit: boolean;
       error?: string;
     }>;
   }> {
     const targetPathwayId = pathwayId || config.bland.pathwayId;
+    const PAGE_SIZE = 1000;
+    const MAX_PAGES = 100;
 
-    logger.info("Fetching call logs from Bland (SEQUENTIAL)", {
+    // end_date is exclusive in Bland API, so add one day
+    const endDate = new Date(date + "T00:00:00Z");
+    endDate.setUTCDate(endDate.getUTCDate() + 1);
+    const endDateStr = endDate.toISOString().split("T")[0];
+    const dateParams = { start_date: date, end_date: endDateStr };
+
+    logger.info("Fetching call logs from Bland (sequential/paginated)", {
       date,
+      end_date: endDateStr,
       pathway_id: targetPathwayId,
     });
 
@@ -656,84 +721,85 @@ class BlandService {
       created_at: string;
     }> = [];
     const seenCallIds = new Set<string>();
-    const hourlyBreakdown: Array<{
-      hour: number;
-      hourLabel: string;
+    const pageBreakdown: Array<{
+      page: number;
       count: number;
-      hitLimit: boolean;
       error?: string;
     }> = [];
 
-    for (let hour = 0; hour < 24; hour++) {
-      const result = await this.fetchHourlyCallLogs(date, hour, targetPathwayId);
+    let page = 0;
+    let hasMore = true;
 
-      hourlyBreakdown.push({
-        hour: result.hour,
-        hourLabel: result.hourLabel,
-        count: result.count,
-        hitLimit: result.hitLimit,
+    while (hasMore && page < MAX_PAGES) {
+      const result = await this.fetchCallPage(page * PAGE_SIZE, PAGE_SIZE, dateParams, targetPathwayId);
+
+      pageBreakdown.push({
+        page,
+        count: result.returned,
         error: result.error,
       });
 
       if (result.error) {
-        logger.error("Failed to fetch calls for hour", {
+        logger.error("Failed to fetch page", {
           date,
-          hour: result.hourLabel,
+          page,
           error: result.error,
         });
+        hasMore = false;
       } else {
-        // Calls are already processed - just deduplicate and add
         for (const call of result.calls) {
           if (!seenCallIds.has(call.call_id)) {
             seenCallIds.add(call.call_id);
-            allCalls.push(call); // Already in correct format
+            allCalls.push(call);
           }
         }
 
-        logger.info("Fetched hourly chunk (sequential)", {
+        logger.info("Fetched page (sequential)", {
           date,
-          hour: result.hourLabel,
-          count: result.count,
+          page,
+          count: result.returned,
           totalSoFar: allCalls.length,
-          hitLimit: result.hitLimit,
+          totalCount: result.totalCount,
         });
 
-        if (result.hitLimit) {
-          logger.warn("Hit 1000 call limit for hour", { date, hour: result.hourLabel });
+        if (onPageComplete) {
+          const totalPages = Math.ceil(result.totalCount / PAGE_SIZE);
+          onPageComplete({
+            page: page + 1,
+            totalPages,
+            count: result.returned,
+            totalSoFar: allCalls.length,
+          });
+        }
+
+        if (result.returned < PAGE_SIZE) {
+          hasMore = false;
         }
       }
 
-      // Callback for progress tracking
-      if (onHourComplete) {
-        onHourComplete({
-          hour: result.hour,
-          hourLabel: result.hourLabel,
-          count: result.count,
-          totalSoFar: allCalls.length,
-          hitLimit: result.hitLimit,
-        });
-      }
+      page++;
 
       // Small delay between requests
-      if (hour < 23) {
+      if (hasMore) {
         await this.sleep(100);
       }
     }
 
-    logger.info("Finished fetching call logs (SEQUENTIAL)", {
+    logger.info("Finished fetching call logs (sequential)", {
       date,
       total_calls: allCalls.length,
+      pages_used: page,
     });
 
-    return { calls: allCalls, hourlyBreakdown };
+    return { calls: allCalls, pageBreakdown };
   }
 
   /**
-   * Fetch call logs for today up to the current hour (for live reports)
-   * Only fetches completed hours to ensure accurate data.
+   * Fetch call logs for today up to now (for live reports)
+   * Uses start_date=today with from/to pagination.
    *
    * @param pathwayId - Optional pathway ID filter
-   * @returns Object with calls, hourly breakdown, and metadata
+   * @returns Object with calls and metadata
    */
   async getCallLogsTodayUntilNow(pathwayId?: string): Promise<{
     date: string;
@@ -772,69 +838,70 @@ class BlandService {
     const currentHour = parseInt(hourFormatter.format(now), 10);
     const targetPathwayId = pathwayId || config.bland.pathwayId;
 
-    logger.info("Fetching call logs for today until current hour", {
+    // end_date = tomorrow (exclusive)
+    const endDate = new Date(date + "T00:00:00Z");
+    endDate.setUTCDate(endDate.getUTCDate() + 1);
+    const endDateStr = endDate.toISOString().split("T")[0];
+
+    logger.info("Fetching call logs for today until now (paginated)", {
       date,
       currentHour,
       pathway_id: targetPathwayId,
     });
 
-    const allCalls: Array<{
-      call_id: string;
-      pathway_tags: string[];
-      status: string;
-      answered_by: string;
-      created_at: string;
-    }> = [];
-    const seenCallIds = new Set<string>();
-    const hourlyBreakdown: Array<{
-      hour: number;
-      hourLabel: string;
-      count: number;
-      hitLimit: boolean;
-      error?: string;
-    }> = [];
+    try {
+      const result = await this.fetchAllCallsPaginated(
+        { start_date: date, end_date: endDateStr },
+        targetPathwayId
+      );
 
-    // Fetch hours 0 to currentHour (inclusive) in parallel
-    const hoursToFetch = currentHour + 1;
-    const hourlyPromises = Array.from({ length: hoursToFetch }, (_, hour) =>
-      this.fetchHourlyCallLogs(date, hour, targetPathwayId)
-    );
-    const hourlyResults = await Promise.all(hourlyPromises);
+      // Build hourly breakdown from the fetched calls for backward compatibility
+      const hourlyBreakdown: Array<{
+        hour: number;
+        hourLabel: string;
+        count: number;
+        hitLimit: boolean;
+        error?: string;
+      }> = [];
 
-    for (const result of hourlyResults) {
-      hourlyBreakdown.push({
-        hour: result.hour,
-        hourLabel: result.hourLabel,
-        count: result.count,
-        hitLimit: result.hitLimit,
-        error: result.error,
+      const hourCounts = new Map<number, number>();
+      for (const call of result.calls) {
+        const callDate = new Date(call.created_at);
+        const callHour = callDate.getUTCHours();
+        hourCounts.set(callHour, (hourCounts.get(callHour) || 0) + 1);
+      }
+
+      for (let h = 0; h <= currentHour; h++) {
+        const count = hourCounts.get(h) || 0;
+        hourlyBreakdown.push({
+          hour: h,
+          hourLabel: `${h.toString().padStart(2, "0")}:00`,
+          count,
+          hitLimit: false, // No longer relevant with proper pagination
+        });
+      }
+
+      logger.info("Finished fetching call logs for today", {
+        date,
+        currentHour,
+        total_calls: result.calls.length,
+        pages_used: result.pagesUsed,
       });
 
-      if (!result.error) {
-        // Calls are already processed - just deduplicate and add
-        for (const call of result.calls) {
-          if (!seenCallIds.has(call.call_id)) {
-            seenCallIds.add(call.call_id);
-            allCalls.push(call); // Already in correct format
-          }
-        }
-      }
+      return {
+        date,
+        currentHour,
+        hoursProcessed: currentHour + 1,
+        calls: result.calls,
+        hourlyBreakdown,
+      };
+    } catch (error: any) {
+      logger.error("Failed to fetch today's call logs", {
+        date,
+        error: error.message,
+      });
+      throw new Error(`Failed to fetch today's call logs: ${error.message}`);
     }
-
-    logger.info("Finished fetching call logs until current hour", {
-      date,
-      currentHour,
-      hoursProcessed: hoursToFetch,
-      total_calls: allCalls.length,
-    });
-
-    return {
-      date,
-      currentHour,
-      hoursProcessed: hoursToFetch,
-      calls: allCalls,
-      hourlyBreakdown,
-    };
   }
 }
 
