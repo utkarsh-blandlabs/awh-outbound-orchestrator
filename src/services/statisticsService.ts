@@ -193,14 +193,21 @@ class StatisticsService {
   /**
    * Record a call completion
    * @param outcome - Call outcome (e.g., TRANSFERRED, VOICEMAIL, NO_ANSWER)
-   * @param pathway_tags - Bland pathway tags (used to match Marlinea's filtering logic)
+   * @param callData - Additional call data for accurate categorization
    *
-   * NOTE: answered_by and transcript parameters removed - we now use pathway_tags
-   * to match Marlinea's Bland filter logic for answered/transferred counts.
+   * UPDATED: Now uses the same logic as reportAnalysis/categorizers for consistency.
+   * - answered_calls: Only counts calls where human actually engaged (answered_by=human + duration >= 20s)
+   * - transferred_calls: Uses warm_transfer_call.state === "MERGED" (most reliable)
    */
   recordCallComplete(
     outcome: string,
-    pathway_tags?: string[]
+    callData?: {
+      answered_by?: string;
+      duration?: number;
+      transcript_length?: number;
+      warm_transfer_call?: { state?: string };
+      pathway_tags?: string[];
+    }
   ): void {
     const today = this.getTodayDate();
     const stats = this.getStatsByDate(today);
@@ -211,43 +218,42 @@ class StatisticsService {
     // Categorize by outcome
     const normalizedOutcome = outcome.toLowerCase();
 
-    // Normalize pathway tags for matching
-    // Bland API can return tags as objects: [{name: "Tag Name", color: "#hex"}] or as strings
-    // We need to handle both formats and extract tag names
-    const tags = (pathway_tags || [])
-      .map((t: any) => {
-        if (typeof t === "string") return t.toLowerCase();
-        if (t && typeof t === "object" && t.name) return t.name.toLowerCase();
-        return null;
-      })
-      .filter((t): t is string => t !== null);
+    // Extract call data with defaults
+    const answeredBy = (callData?.answered_by || "").toLowerCase();
+    const duration = callData?.duration || 0;
+    const transcriptLength = callData?.transcript_length || 0;
+    const warmTransferState = callData?.warm_transfer_call?.state || "";
 
     // ============================================================================
-    // ANSWERED CALLS LOGIC:
-    // A call is "answered" ONLY if a human actually picked up and engaged.
-    // This means ONLY calls with "Plan Type" tag count as answered.
-    // Voicemail Left does NOT count as answered (person didn't pick up).
+    // ANSWERED CALLS LOGIC (matches reportAnalysis/categorizers/humanAnswered.ts):
+    // A call is "human answered" ONLY if:
+    // 1. answered_by === "human" AND duration >= 20 seconds
+    // 2. OR transcript has real conversation (length >= 50) AND duration >= 20s
     //
-    // answered_calls = human answered and engaged (Plan Type tag)
-    // voicemail_calls = went to voicemail (tracked separately below)
+    // This is MORE restrictive than tag-based counting and matches Marinela's logic.
     // ============================================================================
-    const hasPlanTypeTag = tags.some((tag) => tag.includes("plan type"));
-    const hasVoicemailLeftTag = tags.some((tag) => tag.includes("voicemail left"));
+    const MIN_DURATION_SEC = 20;
+    const MIN_TRANSCRIPT_LENGTH = 50;
 
-    // Only count as answered if human engaged (Plan Type)
-    // Do NOT count voicemail as answered
-    if (hasPlanTypeTag) {
+    const isHumanAnswered = (
+      // Primary: answered_by is "human" with decent duration
+      (answeredBy === "human" && duration >= MIN_DURATION_SEC) ||
+      // Secondary: Real conversation detected (transcript + duration)
+      (transcriptLength >= MIN_TRANSCRIPT_LENGTH && duration >= MIN_DURATION_SEC)
+    );
+
+    if (isHumanAnswered) {
       stats.answered_calls++;
     }
 
     // ============================================================================
-    // MARLINEA'S LOGIC FOR TRANSFERRED CALLS:
-    // A call is "transferred" if it has "Transferred to Agent" tag
-    // This matches the Bland filter: Tags includes "Transferred to Agent"
+    // TRANSFERRED CALLS LOGIC (matches reportAnalysis/categorizers/transferred.ts):
+    // A call is "transferred" ONLY if warm_transfer_call.state === "MERGED"
+    // This is the most reliable indicator that transfer actually completed.
     // ============================================================================
-    const hasTransferredTag = tags.some((tag) => tag.includes("transferred to agent"));
+    const isTransferred = warmTransferState === "MERGED";
 
-    if (hasTransferredTag) {
+    if (isTransferred) {
       stats.transferred_calls++;
     }
 
@@ -277,15 +283,17 @@ class StatisticsService {
     logger.info("Statistics updated", {
       date: today,
       outcome,
-      pathway_tags: tags,
-      has_plan_type: hasPlanTypeTag,
-      has_voicemail_left: hasVoicemailLeftTag,
-      has_transferred: hasTransferredTag,
+      answered_by: answeredBy,
+      duration,
+      transcript_length: transcriptLength,
+      warm_transfer_state: warmTransferState,
+      is_human_answered: isHumanAnswered,
+      is_transferred: isTransferred,
       total_calls: stats.total_calls,
       answered_calls: stats.answered_calls,
       transferred_calls: stats.transferred_calls,
       voicemail_calls: stats.voicemail_calls,
-      note: "answered_calls = Plan Type tag ONLY (human engaged), voicemail NOT counted as answered",
+      note: "answered_calls = human answered (answered_by=human + duration>=20s)",
     });
   }
 

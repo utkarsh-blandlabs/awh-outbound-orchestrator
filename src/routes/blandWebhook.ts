@@ -208,11 +208,15 @@ async function processCallCompletion(
         (transcript as any).error_message || "Call failed"
       );
     } else {
-      // Pass pathway_tags to match Marlinea's Bland filter logic for answered/transferred counts
-      statisticsService.recordCallComplete(
-        transcript.outcome,
-        transcript.pathway_tags // Use pathway tags for accurate filtering
-      );
+      // Pass full call data for accurate answered/transferred detection
+      // Uses same logic as reportAnalysis/categorizers (answered_by + duration + warm_transfer_call)
+      statisticsService.recordCallComplete(transcript.outcome, {
+        answered_by: transcript.answered_by,
+        duration: transcript.duration,
+        transcript_length: (transcript.transcript || "").length,
+        warm_transfer_call: transcript.warm_transfer_call,
+        pathway_tags: transcript.pathway_tags,
+      });
     }
 
     // Record outcome in number pool service for intelligent rotation
@@ -613,11 +617,15 @@ async function processInboundCall(
     }
 
     // Step 5: Record statistics
-    // Pass pathway_tags to match Marlinea's Bland filter logic for answered/transferred counts
-    statisticsService.recordCallComplete(
-      transcript.outcome,
-      transcript.pathway_tags // Use pathway tags for accurate filtering
-    );
+    // Pass full call data for accurate answered/transferred detection
+    // Uses same logic as reportAnalysis/categorizers (answered_by + duration + warm_transfer_call)
+    statisticsService.recordCallComplete(transcript.outcome, {
+      answered_by: transcript.answered_by,
+      duration: transcript.duration,
+      transcript_length: (transcript.transcript || "").length,
+      warm_transfer_call: transcript.warm_transfer_call,
+      pathway_tags: transcript.pathway_tags,
+    });
 
     // Step 6: Record call completion in daily tracker
     dailyCallTracker.recordCallComplete(
