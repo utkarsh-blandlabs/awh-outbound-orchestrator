@@ -42,7 +42,7 @@ services:
       - key: CACHE_COMPLETED_RETENTION_MINUTES
         value: 90
       - key: CACHE_PENDING_MAX_AGE_MINUTES
-        value: 90
+        value: 15
       - key: CACHE_CLEANUP_INTERVAL_MINUTES
-        value: 10
+        value: 5
     autoDeploy: true # Auto-deploy on push to async-orchestrator branch
