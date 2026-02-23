@@ -1298,20 +1298,40 @@ class RedialQueueService {
           );
 
           if (activeCallToNumber) {
-            logger.info("SAFETY: Skipping redial - active/pending call detected in CallStateManager", {
-              lead_id: lead.lead_id,
-              phone: lead.phone_number,
-              active_call_id: activeCallToNumber.call_id,
-              next_attempt: lead.attempts + 1,
-            });
+            // Check if the pending call is stale (older than 10 minutes)
+            // Normal calls complete within 30 seconds to 5 minutes
+            // If pending for 10+ minutes, the webhook likely never arrived
+            const callAgeMinutes = (now - activeCallToNumber.created_at) / 60000;
+            const STALE_CALL_THRESHOLD_MINUTES = 10;
 
-            // Push redial ahead by 5 minutes to avoid conflict
-            const pushAheadMinutes = 5;
-            lead.next_redial_timestamp = now + pushAheadMinutes * 60 * 1000;
-            lead.updated_at = now;
-            await this.saveRecords();
-            skippedCount++;
-            continue; // Skip to next lead
+            if (callAgeMinutes > STALE_CALL_THRESHOLD_MINUTES) {
+              // Auto-complete the stale call so redials can continue
+              logger.warn("AUTO-CLEARING stale pending call (webhook likely never arrived)", {
+                lead_id: lead.lead_id,
+                phone: lead.phone_number,
+                stale_call_id: activeCallToNumber.call_id,
+                age_minutes: Math.round(callAgeMinutes),
+                threshold_minutes: STALE_CALL_THRESHOLD_MINUTES,
+              });
+              CallStateManager.completeCall(activeCallToNumber.call_id);
+              // Don't skip - proceed with the redial
+            } else {
+              logger.info("SAFETY: Skipping redial - active/pending call detected in CallStateManager", {
+                lead_id: lead.lead_id,
+                phone: lead.phone_number,
+                active_call_id: activeCallToNumber.call_id,
+                call_age_minutes: Math.round(callAgeMinutes),
+                next_attempt: lead.attempts + 1,
+              });
+
+              // Push redial ahead by 5 minutes to avoid conflict
+              const pushAheadMinutes = 5;
+              lead.next_redial_timestamp = now + pushAheadMinutes * 60 * 1000;
+              lead.updated_at = now;
+              await this.saveRecords();
+              skippedCount++;
+              continue; // Skip to next lead
+            }
           }
 
           // PRE-CALL SAFETY CHECK #2b: CRITICAL - Check dailyCallTracker for active calls

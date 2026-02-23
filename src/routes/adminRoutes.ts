@@ -1153,12 +1153,11 @@ router.post(
           no_answer_calls,
           connectivity_rate,
         },
-        hourly_breakdown: result.hourlyBreakdown,
+        page_breakdown: result.pageBreakdown,
         comparison: {
           note: "Use this to verify against parallel fetch or Marlinea's numbers",
-          total_from_breakdown: result.hourlyBreakdown.reduce((sum, h) => sum + h.count, 0),
-          hours_with_errors: result.hourlyBreakdown.filter(h => h.error).length,
-          hours_at_limit: result.hourlyBreakdown.filter(h => h.hitLimit).length,
+          total_from_breakdown: result.pageBreakdown.reduce((sum: number, p: any) => sum + p.count, 0),
+          pages_with_errors: result.pageBreakdown.filter((p: any) => p.error).length,
         },
       });
     } catch (error: any) {

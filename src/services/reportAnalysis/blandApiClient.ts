@@ -72,51 +72,91 @@ export class BlandApiClient {
   }
 
   /**
-   * Fetch calls for a date range (uses list endpoint)
+   * Map raw Bland API call object to CallData
+   */
+  private mapCallData(d: any): CallData {
+    return {
+      call_id: d.call_id || d.c_id,
+      to_number: d.to,
+      from_number: d.from,
+      concatenated_transcript: d.concatenated_transcript || "",
+      status: d.status,
+      answered_by: d.answered_by,
+      call_length: d.call_length,
+      corrected_duration: d.corrected_duration,
+      error_message: d.error_message,
+      pathway_tags: d.pathway_tags,
+      warm_transfer_call: d.warm_transfer_call,
+      variables: d.variables,
+      summary: d.summary,
+      inbound: d.inbound,
+      created_at: d.created_at,
+    };
+  }
+
+  /**
+   * Fetch calls for a date range using from/to pagination with start_date/end_date filtering.
+   * Automatically paginates through all results.
    */
   async fetchCallsByDate(
     fromDate: string,
     toDate: string,
     limit = 1000
   ): Promise<CallData[]> {
-    await this.rateLimit();
+    const PAGE_SIZE = Math.min(limit, 1000);
+    const MAX_PAGES = 100;
+
+    // end_date is exclusive in Bland API, so add one day to toDate
+    const endDate = new Date(toDate + "T00:00:00Z");
+    endDate.setUTCDate(endDate.getUTCDate() + 1);
+    const endDateStr = endDate.toISOString().split("T")[0];
+
+    const allCalls: CallData[] = [];
+    const seenIds = new Set<string>();
+    let page = 0;
+    let hasMore = true;
 
     try {
-      const res = await axios.get(`${BLAND_BASE_URL}/v1/calls`, {
-        headers: { Authorization: this.apiKey },
-        timeout: 30000,
-        params: {
-          from_date: `${fromDate}T00:00:00.000Z`,
-          to_date: `${toDate}T23:59:59.999Z`,
-          limit,
-        },
-      });
+      while (hasMore && page < MAX_PAGES) {
+        await this.rateLimit();
 
-      const calls = res.data?.calls || res.data || [];
-      return (Array.isArray(calls) ? calls : []).map((d: any) => ({
-        call_id: d.call_id || d.c_id,
-        to_number: d.to,
-        from_number: d.from,
-        concatenated_transcript: d.concatenated_transcript || "",
-        status: d.status,
-        answered_by: d.answered_by,
-        call_length: d.call_length,
-        corrected_duration: d.corrected_duration,
-        error_message: d.error_message,
-        pathway_tags: d.pathway_tags,
-        warm_transfer_call: d.warm_transfer_call,
-        variables: d.variables,
-        summary: d.summary,
-        inbound: d.inbound,
-        created_at: d.created_at,
-      }));
+        const res = await axios.get(`${BLAND_BASE_URL}/v1/calls`, {
+          headers: { Authorization: this.apiKey },
+          timeout: 30000,
+          params: {
+            start_date: fromDate,
+            end_date: endDateStr,
+            from: page * PAGE_SIZE,
+            to: (page + 1) * PAGE_SIZE,
+          },
+        });
+
+        const rawCalls = res.data?.calls || res.data || [];
+        const calls = (Array.isArray(rawCalls) ? rawCalls : []);
+
+        for (const d of calls) {
+          const call = this.mapCallData(d);
+          if (call.call_id && !seenIds.has(call.call_id)) {
+            seenIds.add(call.call_id);
+            allCalls.push(call);
+          }
+        }
+
+        if (calls.length < PAGE_SIZE) {
+          hasMore = false;
+        }
+
+        page++;
+      }
+
+      return allCalls;
     } catch (error: any) {
       logger.error("Failed to fetch calls by date", {
         fromDate,
         toDate,
         error: error.message,
       });
-      return [];
+      return allCalls.length > 0 ? allCalls : [];
     }
   }
 }
